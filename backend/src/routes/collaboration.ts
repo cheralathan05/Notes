@@ -1159,3 +1159,18 @@ router.get('/:id/activity', async (req: Request, res: Response): Promise<void> =
         user: { select: { id: true, displayName: true, avatarUrl: true } },
       },
     });
+
+    res.json({
+      success: true,
+      data: { activities },
+    });
+  } catch (error) {
+    console.error('List activity error:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to list activity' },
+    });
+  }
+});
+
+export default router;

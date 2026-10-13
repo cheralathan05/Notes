@@ -599,12 +599,52 @@ class ApiClient {
     return this.request<{ tasks: TaskItem[] }>(`/api/tasks?${searchParams.toString()}`);
   }
 
+  // ─── Tasks & Project Management OS ──────────────────────────────────────
+
+  async getTasks(params: {
+    projectId?: string;
+    status?: string;
+    priority?: string;
+    assigneeId?: string;
+    dueFilter?: 'today' | 'overdue' | 'upcoming';
+    search?: string;
+    parentOnly?: boolean;
+    sortBy?: string;
+    sortOrder?: 'asc' | 'desc';
+    documentId?: string;
+  } = {}) {
+    const query = new URLSearchParams();
+    if (params.projectId) query.set('projectId', params.projectId);
+    if (params.status) query.set('status', params.status);
+    if (params.priority) query.set('priority', params.priority);
+    if (params.assigneeId) query.set('assigneeId', params.assigneeId);
+    if (params.dueFilter) query.set('dueFilter', params.dueFilter);
+    if (params.search) query.set('search', params.search);
+    if (params.parentOnly !== undefined) query.set('parentOnly', String(params.parentOnly));
+    if (params.sortBy) query.set('sortBy', params.sortBy);
+    if (params.sortOrder) query.set('sortOrder', params.sortOrder);
+    if (params.documentId) query.set('documentId', params.documentId);
+
+    const queryString = query.toString();
+    return this.request<{ tasks: TaskItem[]; count: number }>(`/api/tasks${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async getTask(id: string) {
+    return this.request<{ task: TaskItem }>(`/api/tasks/${id}`);
+  }
+
   async createTask(data: {
     title: string;
     description?: string;
+    status?: TaskStatusType;
     documentId?: string;
-    priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+    projectId?: string;
+    assigneeId?: string;
+    parentId?: string;
+    priority?: TaskPriorityType;
     dueDate?: string;
+    startDate?: string;
+    estimatedHours?: number;
   }) {
     return this.request<{ task: TaskItem }>('/api/tasks', {
       method: 'POST',
@@ -619,11 +659,133 @@ class ApiClient {
     });
   }
 
-  async updateTask(id: string, data: Partial<TaskItem>) {
+  async updateTask(id: string, data: Partial<TaskItem> & { [key: string]: any }) {
     return this.request<{ task: TaskItem }>(`/api/tasks/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
+  }
+
+  async deleteTask(id: string) {
+    return this.request<{ deleted: boolean }>(`/api/tasks/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async bulkTasks(taskIds: string[], action: 'complete' | 'reopen' | 'delete' | 'archive' | 'status' | 'priority', data?: any) {
+    return this.request<{ affected: number }>('/api/tasks/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ taskIds, action, data }),
+    });
+  }
+
+  async getMyDayTasks() {
+    return this.request<MyDayData>('/api/tasks/my-day');
+  }
+
+  async addChecklistItem(taskId: string, title: string) {
+    return this.request<{ item: TaskChecklistItemType }>(`/api/tasks/${taskId}/checklists`, {
+      method: 'POST',
+      body: JSON.stringify({ title }),
+    });
+  }
+
+  async toggleChecklistItem(taskId: string, itemId: string, isCompleted: boolean) {
+    return this.request<{ item: TaskChecklistItemType }>(`/api/tasks/${taskId}/checklists/${itemId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isCompleted }),
+    });
+  }
+
+  async addDependency(blockedTaskId: string, blockingTaskId: string) {
+    return this.request<{ dependency: any }>(`/api/tasks/${blockedTaskId}/dependencies`, {
+      method: 'POST',
+      body: JSON.stringify({ blockingTaskId }),
+    });
+  }
+
+  async removeDependency(blockedTaskId: string, blockingTaskId: string) {
+    return this.request<{ removed: boolean }>(`/api/tasks/${blockedTaskId}/dependencies/${blockingTaskId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async addTaskComment(taskId: string, content: string) {
+    return this.request<{ comment: TaskCommentItemType }>(`/api/tasks/${taskId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    });
+  }
+
+  // ─── Projects API ──────────────────────────────────────────────────────────
+
+  async getProjects(status?: string) {
+    const query = status ? `?status=${status}` : '';
+    return this.request<{ projects: ProjectItem[] }>(`/api/projects${query}`);
+  }
+
+  async getProject(id: string) {
+    return this.request<{ project: ProjectItem }>(`/api/projects/${id}`);
+  }
+
+  async createProject(data: {
+    name: string;
+    description?: string;
+    startDate?: string;
+    targetDate?: string;
+  }) {
+    return this.request<{ project: ProjectItem }>('/api/projects', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateProject(id: string, data: Partial<ProjectItem>) {
+    return this.request<{ project: ProjectItem }>(`/api/projects/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteProject(id: string) {
+    return this.request<{ deleted: boolean }>(`/api/projects/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async recalculateProjectProgress(id: string) {
+    return this.request<any>(`/api/projects/${id}/progress`, {
+      method: 'POST',
+    });
+  }
+
+  async addMilestone(projectId: string, data: { title: string; description?: string; targetDate?: string }) {
+    return this.request<{ milestone: any }>(`/api/projects/${projectId}/milestones`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateMilestone(projectId: string, milestoneId: string, data: { isCompleted?: boolean; title?: string; targetDate?: string }) {
+    return this.request<{ milestone: any }>(`/api/projects/${projectId}/milestones/${milestoneId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // ─── Terminal Command Center API ───────────────────────────────────────────
+
+  async executeTerminalCommand(command: string) {
+    return this.request<TerminalExecutionData>('/api/tasks/terminal/execute', {
+      method: 'POST',
+      body: JSON.stringify({ command }),
+    });
+  }
+
+  async getTerminalSuggestions(q: string) {
+    return this.request<{ suggestions: Array<{ text: string; description: string; category: string }> }>(
+      `/api/tasks/terminal/suggestions?q=${encodeURIComponent(q)}`
+    );
   }
 }
 
@@ -840,21 +1002,118 @@ export interface InvitationDetails {
   status: InvitationStatusType;
 }
 
+export type TaskStatusType = 'BACKLOG' | 'TODO' | 'IN_PROGRESS' | 'IN_REVIEW' | 'DONE' | 'CANCELLED';
+export type TaskPriorityType = 'URGENT' | 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
+export type ProjectStatusType = 'PLANNING' | 'ACTIVE' | 'ON_HOLD' | 'COMPLETED' | 'ARCHIVED';
+export type ProjectHealthType = 'ON_TRACK' | 'AT_RISK' | 'OFF_TRACK';
+
+export interface TaskChecklistItemType {
+  id: string;
+  taskId: string;
+  title: string;
+  isCompleted: boolean;
+  orderIndex: number;
+  createdAt: string;
+}
+
+export interface TaskCommentItemType {
+  id: string;
+  taskId: string;
+  content: string;
+  createdAt: string;
+  user: {
+    id: string;
+    displayName: string;
+    email: string;
+    avatarUrl: string | null;
+  };
+}
+
+export interface TaskBlockerItemType {
+  id: string;
+  title: string;
+  status: TaskStatusType;
+  assignee?: { displayName: string } | null;
+}
+
 export interface TaskItem {
   id: string;
   workspaceId: string;
   creatorId: string;
   documentId?: string | null;
+  projectId?: string | null;
+  parentId?: string | null;
+  milestoneId?: string | null;
   title: string;
   description?: string | null;
-  status: 'TODO' | 'IN_PROGRESS' | 'DONE' | 'CANCELLED';
-  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+  status: TaskStatusType;
+  priority: TaskPriorityType;
   dueDate?: string | null;
+  startDate?: string | null;
   assigneeId?: string | null;
+  orderIndex?: number;
+  isArchived?: boolean;
+  isBlocked?: boolean;
+  blockers?: TaskBlockerItemType[];
+  subtaskProgress?: { total: number; done: number; percentage: number };
+  checklistProgress?: { total: number; done: number; percentage: number };
+  creator?: { id: string; displayName: string; email: string; avatarUrl?: string | null };
+  assignee?: { id: string; displayName: string; email: string; avatarUrl?: string | null };
+  project?: { id: string; name: string; color?: string; icon?: string };
+  document?: { id: string; title: string; icon?: string | null };
+  subtasks?: any[];
+  checklists?: TaskChecklistItemType[];
+  comments?: TaskCommentItemType[];
   createdAt: string;
   updatedAt: string;
 }
 
+export interface ProjectItem {
+  id: string;
+  workspaceId: string;
+  creatorId: string;
+  name: string;
+  description?: string | null;
+  color?: string | null;
+  icon?: string | null;
+  status: ProjectStatusType;
+  health: ProjectHealthType;
+  progress: number;
+  startDate?: string | null;
+  targetDate?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  creator?: { id: string; displayName: string; email: string };
+  members?: Array<{ id: string; user: { id: string; displayName: string; email: string } }>;
+  milestones?: Array<{ id: string; title: string; dueDate?: string | null; isCompleted: boolean }>;
+  _count?: { tasks: number };
+}
+
+export interface MyDayData {
+  today: TaskItem[];
+  overdue: TaskItem[];
+  upcoming: TaskItem[];
+  completed: TaskItem[];
+  waitingOnOthers: TaskItem[];
+  stats: {
+    todayCount: number;
+    overdueCount: number;
+    upcomingCount: number;
+    completedCount: number;
+    blockedCount: number;
+  };
+}
+
+export interface TerminalExecutionData {
+  success: boolean;
+  command: string;
+  output: string;
+  data?: any;
+  error?: string;
+  timestamp: string;
+}
+
 export const api = new ApiClient(API_BASE_URL);
+
 
 

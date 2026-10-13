@@ -16,6 +16,7 @@ import aiRoutes from './routes/ai';
 import collaborationRoutes from './routes/collaboration';
 import exportImportRoutes from './routes/export-import';
 import taskRoutes from './routes/tasks';
+import projectRoutes from './routes/projects';
 
 // Validate environment before starting
 validateEnv();
@@ -86,6 +87,7 @@ app.use('/api/attachments', generalLimiter, attachmentRoutes);
 app.use('/api/search', generalLimiter, searchRoutes);
 app.use('/api/ai', generalLimiter, aiRoutes);
 app.use('/api/tasks', generalLimiter, taskRoutes);
+app.use('/api/projects', generalLimiter, projectRoutes);
 app.use('/api', generalLimiter, collaborationRoutes); // Public share endpoint: /api/public/documents/:token
 
 

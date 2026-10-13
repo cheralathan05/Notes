@@ -16,6 +16,7 @@ import {
   ExternalLink,
   CheckCircle2,
   FileText,
+  CheckSquare,
 } from 'lucide-react';
 
 interface AppShellProps {
@@ -32,6 +33,7 @@ export default function AppShell({ children, headerTitle, headerSubtitle }: AppS
   const navItems = [
     { label: 'DASHBOARD', href: '/dashboard', icon: LayoutDashboard },
     { label: 'DOCUMENTS', href: '/documents', icon: FileText },
+    { label: 'TASKS', href: '/tasks', icon: CheckSquare },
     { label: 'PROFILE', href: '/settings/profile', icon: User },
     { label: 'SECURITY', href: '/settings/security', icon: Shield },
     { label: 'SESSIONS', href: '/settings/sessions', icon: Layers },
@@ -246,3 +248,5 @@ export default function AppShell({ children, headerTitle, headerSubtitle }: AppS
     </div>
   );
 }
+
+export { AppShell };

@@ -24,7 +24,10 @@ export async function authMiddleware(
   next: NextFunction
 ): Promise<void> {
   try {
-    const rawToken = req.cookies?.[SESSION_COOKIE_NAME];
+    const rawToken =
+      req.cookies?.[SESSION_COOKIE_NAME] ||
+      (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null) ||
+      (typeof req.query?.token === 'string' ? req.query.token : null);
 
     if (!rawToken) {
       res.status(401).json({

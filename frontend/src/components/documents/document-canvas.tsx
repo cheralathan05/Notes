@@ -32,6 +32,7 @@ import {
   ListTree,
   Search,
   Activity,
+  Zap,
 } from 'lucide-react';
 
 import { api, DocumentDetail } from '@/lib/api';
@@ -44,6 +45,7 @@ import { FindReplace } from './find-replace';
 import { TableOfContents } from './table-of-contents';
 import { ActivityModal } from './activity-modal';
 import { SlashCommandMenu } from './slash-command';
+import { UniversalQuickCapture } from './universal-quick-capture';
 
 interface DocumentCanvasProps {
   document: DocumentDetail;
@@ -75,9 +77,22 @@ export function DocumentCanvas({
   const [isTocOpen, setIsTocOpen] = useState(false);
   const [isActivityModalOpen, setIsActivityModalOpen] = useState(false);
   const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false);
+  const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState(false);
   const [showIconPicker, setShowIconPicker] = useState(false);
   const [showActionsDropdown, setShowActionsDropdown] = useState(false);
   const [distractionFree, setDistractionFree] = useState(false);
+
+  // Universal Quick Capture shortcut (Ctrl+Shift+C)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'c' || e.key === 'C')) {
+        e.preventDefault();
+        setIsQuickCaptureOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // File upload input ref
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -330,6 +345,15 @@ export function DocumentCanvas({
                 title="Find & Replace (⌘F)"
               >
                 <Search className="h-3.5 w-3.5" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsQuickCaptureOpen(true)}
+                className="p-1.5 rounded-[2px] text-[#737373] hover:text-[#FAFAFA] transition-colors"
+                title="Universal Quick Capture (Ctrl+Shift+C)"
+              >
+                <Zap className="h-3.5 w-3.5" />
               </button>
 
               <button
@@ -597,6 +621,12 @@ export function DocumentCanvas({
         onClose={() => setIsSlashMenuOpen(false)}
         onOpenAi={() => setIsAiPanelOpen(true)}
         onUploadImage={() => fileInputRef.current?.click()}
+      />
+
+      <UniversalQuickCapture
+        isOpen={isQuickCaptureOpen}
+        onClose={() => setIsQuickCaptureOpen(false)}
+        onSuccess={onRefreshDocument}
       />
     </div>
   );

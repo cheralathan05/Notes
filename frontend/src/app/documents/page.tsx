@@ -22,10 +22,13 @@ import {
   Square,
   Clock,
   Pin,
+  Zap,
 } from 'lucide-react';
 import { api, DocumentItem, FolderItem } from '@/lib/api';
 import { CommandPalette } from '@/components/documents/command-palette';
 import { TemplateModal } from '@/components/documents/template-modal';
+import { UniversalQuickCapture } from '@/components/documents/universal-quick-capture';
+import { PriorityIntelligenceHub } from '@/components/documents/priority-intelligence-hub';
 
 function DocumentLibraryPageContent() {
   const router = useRouter();
@@ -49,8 +52,24 @@ function DocumentLibraryPageContent() {
   // Modals
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+  const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState(false);
 
   const fileImportRef = React.useRef<HTMLInputElement>(null);
+
+  // Keyboard-first shortcuts (Ctrl+Shift+C -> Quick Capture, Ctrl+K -> Command Palette)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'c' || e.key === 'C')) {
+        e.preventDefault();
+        setIsQuickCaptureOpen(true);
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setIsSearchOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const loadDocuments = async () => {
     setLoading(true);
@@ -176,6 +195,16 @@ function DocumentLibraryPageContent() {
           <div className="flex items-center gap-2">
             <button
               type="button"
+              onClick={() => setIsQuickCaptureOpen(true)}
+              className="px-3 py-1.5 rounded-[2px] bg-[#181818] hover:bg-[#222222] text-[#FAFAFA] border border-[#333333] font-mono text-xs flex items-center gap-1.5 transition-colors"
+              title="Shortcut: Ctrl+Shift+C"
+            >
+              <Zap className="h-3.5 w-3.5 text-[#FAFAFA]" />
+              <span>QUICK CAPTURE</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => handleCreateDocument(selectedFolder)}
               className="px-3.5 py-1.5 rounded-[2px] bg-[#FAFAFA] text-[#111111] hover:bg-[#E5E5E5] font-mono text-xs font-semibold flex items-center gap-1.5 transition-colors"
             >
@@ -210,6 +239,16 @@ function DocumentLibraryPageContent() {
             />
           </div>
         </div>
+
+        {/* ─── Priority 1 Sovereign Intelligence Checklist & Daily Brief Hub ─── */}
+        <PriorityIntelligenceHub
+          documents={documents}
+          onOpenQuickCapture={() => setIsQuickCaptureOpen(true)}
+          onOpenTemplates={() => setIsTemplateModalOpen(true)}
+          onOpenCommandPalette={() => setIsSearchOpen(true)}
+          onNewDocument={() => handleCreateDocument(selectedFolder)}
+          onTriggerImport={() => fileImportRef.current?.click()}
+        />
 
         {/* ─── Filters & View Modes Toolbar ─── */}
         <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
@@ -477,6 +516,13 @@ function DocumentLibraryPageContent() {
       <TemplateModal
         isOpen={isTemplateModalOpen}
         onClose={() => setIsTemplateModalOpen(false)}
+      />
+
+      {/* Universal Quick Capture (Ctrl+Shift+C) */}
+      <UniversalQuickCapture
+        isOpen={isQuickCaptureOpen}
+        onClose={() => setIsQuickCaptureOpen(false)}
+        onSuccess={loadDocuments}
       />
     </AppShell>
   );
