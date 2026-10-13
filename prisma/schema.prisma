@@ -1,0 +1,532 @@
+// Prisma Schema — Productivity + AI Workspace SaaS
+// Phase 2: Authentication System
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── User ────────────────────────────────────────────────────────────────────
+
+model User {
+  id                String   @id @default(cuid())
+  email             String   @unique
+  emailNormalized   String   @unique @map("email_normalized")
+  displayName       String   @map("display_name")
+  passwordHash      String   @map("password_hash")
+  emailVerified     Boolean  @default(false) @map("email_verified")
+  accountStatus     AccountStatus @default(ACTIVE) @map("account_status")
+  onboardingComplete Boolean @default(false) @map("onboarding_complete")
+  avatarUrl         String?  @map("avatar_url")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  sessions                Session[]
+  emailVerificationTokens EmailVerificationToken[]
+  passwordResetTokens     PasswordResetToken[]
+  workspaceMemberships    WorkspaceMember[]
+  documents               Document[]
+  folders                 Folder[]
+  revisions               DocumentRevision[]
+  attachments             DocumentAttachment[]
+  comments                DocumentComment[]
+  templates               DocumentTemplate[]
+  activities              DocumentActivity[]
+  documentShares          DocumentShare[]
+  documentMemberships     DocumentMembership[]
+  sentInvitations         DocumentInvitation[]      @relation("SentInvitations")
+  createdPublicLinks      DocumentPublicLink[]
+  documentPublications    DocumentPublication[]
+  createdTasks            Task[]                    @relation("CreatedTasks")
+  assignedTasks           Task[]                    @relation("AssignedTasks")
+
+  @@map("users")
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+// ─── Session ─────────────────────────────────────────────────────────────────
+
+model Session {
+  id             String   @id @default(cuid())
+  userId         String   @map("user_id")
+  tokenHash      String   @unique @map("token_hash")
+  expiresAt      DateTime @map("expires_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  lastActivityAt DateTime @default(now()) @map("last_activity_at")
+  ipAddress      String?  @map("ip_address")
+  userAgent      String?  @map("user_agent")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+// ─── Email Verification Token ────────────────────────────────────────────────
+
+model EmailVerificationToken {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  tokenHash String   @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("email_verification_tokens")
+}
+
+// ─── Password Reset Token ────────────────────────────────────────────────────
+
+model PasswordResetToken {
+  id            String    @id @default(cuid())
+  userId        String    @map("user_id")
+  tokenHash     String    @unique @map("token_hash")
+  otpHash       String?   @map("otp_hash")
+  attempts      Int       @default(0)
+  resetAuthHash String?   @unique @map("reset_auth_hash")
+  expiresAt     DateTime  @map("expires_at")
+  usedAt        DateTime? @map("used_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
+}
+
+// ─── Workspace ───────────────────────────────────────────────────────────────
+
+model Workspace {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  members WorkspaceMember[]
+  documents   Document[]
+  folders     Folder[]
+  tags        DocumentTag[]
+  templates   DocumentTemplate[]
+  tasks       Task[]
+
+  @@map("workspaces")
+}
+
+// ─── Workspace Member ────────────────────────────────────────────────────────
+
+model WorkspaceMember {
+  id          String          @id @default(cuid())
+  workspaceId String          @map("workspace_id")
+  userId      String          @map("user_id")
+  role        WorkspaceRole   @default(MEMBER)
+  joinedAt    DateTime        @default(now()) @map("joined_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@map("workspace_members")
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+// ─── Documents Platform Models ──────────────────────────────────────────────
+
+enum DocumentStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum SharePermission {
+  VIEW
+  COMMENT
+  EDIT
+}
+
+model Document {
+  id          String         @id @default(cuid())
+  workspaceId String         @map("workspace_id")
+  creatorId   String         @map("creator_id")
+  folderId    String?        @map("folder_id")
+  parentId    String?        @map("parent_id")
+  title       String         @default("Untitled")
+  icon        String?
+  coverImage  String?        @map("cover_image")
+  content     Json           @default("{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\"}]}")
+  plainText   String?        @map("plain_text") @db.Text
+  status      DocumentStatus @default(DRAFT)
+  version     Int            @default(1)
+  orderIndex  Float          @default(0) @map("order_index")
+  isFullWidth Boolean        @default(false) @map("is_full_width")
+  isFavorite  Boolean        @default(false) @map("is_favorite")
+  isPinned    Boolean        @default(false) @map("is_pinned")
+  isArchived  Boolean        @default(false) @map("is_archived")
+  isDeleted   Boolean        @default(false) @map("is_deleted")
+  deletedAt   DateTime?      @map("deleted_at")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  workspace   Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creator     User                 @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  folder      Folder?              @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  parent      Document?            @relation("DocumentNesting", fields: [parentId], references: [id], onDelete: SetNull)
+  children    Document[]           @relation("DocumentNesting")
+  revisions   DocumentRevision[]
+  attachments DocumentAttachment[]
+  comments    DocumentComment[]
+  tags         DocumentTagAssignment[]
+  activities   DocumentActivity[]
+  shares       DocumentShare[]
+  memberships  DocumentMembership[]
+  invitations  DocumentInvitation[]
+  publicLink   DocumentPublicLink?
+  publications DocumentPublication[]
+  tasks        Task[]
+
+  @@index([workspaceId])
+  @@index([creatorId])
+  @@index([folderId])
+  @@index([parentId])
+  @@index([isDeleted])
+  @@index([isFavorite])
+  @@index([isArchived])
+  @@map("documents")
+}
+
+model Folder {
+  id          String    @id @default(cuid())
+  workspaceId String    @map("workspace_id")
+  creatorId   String    @map("creator_id")
+  parentId    String?   @map("parent_id")
+  name        String
+  icon        String?
+  color       String?
+  orderIndex  Float     @default(0) @map("order_index")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  workspace   Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creator     User       @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  parent      Folder?    @relation("FolderNesting", fields: [parentId], references: [id], onDelete: SetNull)
+  children    Folder[]   @relation("FolderNesting")
+  documents   Document[]
+
+  @@index([workspaceId])
+  @@index([creatorId])
+  @@index([parentId])
+  @@map("folders")
+}
+
+model DocumentRevision {
+  id          String   @id @default(cuid())
+  documentId  String   @map("document_id")
+  creatorId   String   @map("creator_id")
+  version     Int
+  title       String
+  content     Json
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  creator     User     @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([creatorId])
+  @@map("document_revisions")
+}
+
+model DocumentAttachment {
+  id          String   @id @default(cuid())
+  documentId  String   @map("document_id")
+  uploaderId  String   @map("uploader_id")
+  filename    String
+  mimeType    String   @map("mime_type")
+  size        Int
+  storageKey  String   @map("storage_key")
+  url         String
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  uploader    User     @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([uploaderId])
+  @@map("document_attachments")
+}
+
+model DocumentTemplate {
+  id          String   @id @default(cuid())
+  workspaceId String?  @map("workspace_id")
+  creatorId   String?  @map("creator_id")
+  name        String
+  description String?
+  category    String   @default("General")
+  icon        String?
+  slug        String?  @unique
+  tags        String?
+  content     Json
+  isSystem    Boolean  @default(false) @map("is_system")
+  isFavorite  Boolean  @default(false) @map("is_favorite")
+  usageCount  Int      @default(0) @map("usage_count")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creator     User?      @relation(fields: [creatorId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([category])
+  @@map("document_templates")
+}
+
+model DocumentTag {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  name        String
+  color       String?  @default("#737373")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace   Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  documents   DocumentTagAssignment[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+  @@map("document_tags")
+}
+
+model DocumentTagAssignment {
+  documentId String   @map("document_id")
+  tagId      String   @map("tag_id")
+  assignedAt DateTime @default(now()) @map("assigned_at")
+
+  document   Document    @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  tag        DocumentTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([documentId, tagId])
+  @@index([documentId])
+  @@index([tagId])
+  @@map("document_tag_assignments")
+}
+
+model DocumentComment {
+  id           String            @id @default(cuid())
+  documentId   String            @map("document_id")
+  authorId     String            @map("author_id")
+  parentId     String?           @map("parent_id")
+  content      String            @db.Text
+  selectedText String?           @map("selected_text")
+  isResolved   Boolean           @default(false) @map("is_resolved")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+
+  document     Document          @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  author       User              @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parent       DocumentComment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies      DocumentComment[] @relation("CommentReplies")
+
+  @@index([documentId])
+  @@index([authorId])
+  @@map("document_comments")
+}
+
+model DocumentShare {
+  id          String          @id @default(cuid())
+  documentId  String          @map("document_id")
+  userId      String?         @map("user_id")
+  permission  SharePermission @default(VIEW)
+  shareToken  String?         @unique @map("share_token")
+  isPublic    Boolean         @default(false) @map("is_public")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  document    Document        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user        User?           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([userId])
+  @@map("document_shares")
+}
+
+model DocumentActivity {
+  id         String   @id @default(cuid())
+  documentId String   @map("document_id")
+  userId     String   @map("user_id")
+  action     String
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([userId])
+  @@map("document_activities")
+}
+
+// ─── Collaborative Permissions & Access Control Models ─────────────────────
+
+enum DocumentRole {
+  OWNER
+  EDITOR
+  COMMENTER
+  VIEWER
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
+model DocumentMembership {
+  id         String       @id @default(cuid())
+  documentId String       @map("document_id")
+  userId     String       @map("user_id")
+  role       DocumentRole @default(VIEWER)
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+
+  document   Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, userId])
+  @@index([documentId])
+  @@index([userId])
+  @@map("document_memberships")
+}
+
+model DocumentInvitation {
+  id             String           @id @default(cuid())
+  documentId     String           @map("document_id")
+  inviterId      String           @map("inviter_id")
+  recipientEmail String           @map("recipient_email")
+  role           DocumentRole     @default(VIEWER)
+  tokenHash      String           @unique @map("token_hash")
+  status         InvitationStatus @default(PENDING)
+  message        String?
+  expiresAt      DateTime         @map("expires_at")
+  acceptedAt     DateTime?        @map("accepted_at")
+  revokedAt      DateTime?        @map("revoked_at")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  document       Document         @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  inviter        User             @relation("SentInvitations", fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([recipientEmail])
+  @@index([tokenHash])
+  @@index([status])
+  @@map("document_invitations")
+}
+
+model DocumentPublicLink {
+  id           String          @id @default(cuid())
+  documentId   String          @unique @map("document_id")
+  tokenHash    String          @unique @map("token_hash")
+  publicToken  String          @unique @map("public_token")
+  permission   SharePermission @default(VIEW)
+  isEnabled    Boolean         @default(false) @map("is_enabled")
+  expiresAt    DateTime?       @map("expires_at")
+  passwordHash String?         @map("password_hash")
+  revokedAt    DateTime?       @map("revoked_at")
+  createdById  String          @map("created_by_id")
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+
+  document     Document        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  creator      User            @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([publicToken])
+  @@map("document_public_links")
+}
+
+model DocumentPublication {
+  id               String         @id @default(cuid())
+  documentId       String         @map("document_id")
+  publisherId      String         @map("publisher_id")
+  status           DocumentStatus @default(DRAFT)
+  publishedTitle   String         @map("published_title")
+  publishedContent Json           @map("published_content")
+  publishedAt      DateTime?      @map("published_at")
+  unpublishedAt    DateTime?      @map("unpublished_at")
+  version          Int            @default(1)
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  document         Document       @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  publisher        User           @relation(fields: [publisherId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([status])
+  @@map("document_publications")
+}
+
+// ─── Notes-to-Tasks Engine Models ──────────────────────────────────────────
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Task {
+  id          String       @id @default(cuid())
+  workspaceId String       @map("workspace_id")
+  creatorId   String       @map("creator_id")
+  assigneeId  String?      @map("assignee_id")
+  documentId  String?      @map("document_id")
+  title       String
+  description String?
+  status      TaskStatus   @default(TODO)
+  priority    TaskPriority @default(MEDIUM)
+  dueDate     DateTime?    @map("due_date")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creator     User         @relation("CreatedTasks", fields: [creatorId], references: [id], onDelete: Cascade)
+  assignee    User?        @relation("AssignedTasks", fields: [assigneeId], references: [id], onDelete: SetNull)
+  document    Document?    @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([creatorId])
+  @@index([assigneeId])
+  @@index([documentId])
+  @@map("tasks")
+}
+

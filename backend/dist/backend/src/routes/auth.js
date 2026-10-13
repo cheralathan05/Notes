@@ -1,0 +1,422 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const prisma_1 = require("../lib/prisma");
+const password_1 = require("../lib/password");
+const tokens_1 = require("../lib/tokens");
+const email_1 = require("../lib/email");
+const auth_1 = require("../middleware/auth");
+const validate_1 = require("../middleware/validate");
+const config_1 = require("../config");
+const shared_import_1 = require("../../shared-import");
+const router = (0, express_1.Router)();
+// ─── Helper: safe user serialization ─────────────────────────────────────────
+function serializeUser(user) {
+    return {
+        id: user.id,
+        email: user.email,
+        displayName: user.displayName,
+        emailVerified: user.emailVerified,
+        onboardingComplete: user.onboardingComplete,
+        avatarUrl: user.avatarUrl,
+        createdAt: user.createdAt.toISOString(),
+    };
+}
+// ─── POST /api/auth/register ─────────────────────────────────────────────────
+router.post('/register', (0, validate_1.validate)(shared_import_1.registerSchema), async (req, res) => {
+    try {
+        const { email, password, displayName } = req.body;
+        const emailNormalized = email.toLowerCase().trim();
+        // Check for existing user
+        const existing = await prisma_1.prisma.user.findUnique({
+            where: { emailNormalized },
+        });
+        if (existing) {
+            // Generic message to prevent account enumeration
+            res.status(409).json({
+                success: false,
+                error: {
+                    code: 'EMAIL_EXISTS',
+                    message: 'An account with this email address already exists',
+                },
+            });
+            return;
+        }
+        // Hash password
+        const passwordHash = await (0, password_1.hashPassword)(password);
+        // Create user
+        const user = await prisma_1.prisma.user.create({
+            data: {
+                email: emailNormalized,
+                emailNormalized,
+                displayName,
+                passwordHash,
+            },
+        });
+        // Generate verification token
+        const { raw: verifyToken, hash: verifyHash } = (0, tokens_1.generateToken)();
+        await prisma_1.prisma.emailVerificationToken.create({
+            data: {
+                userId: user.id,
+                tokenHash: verifyHash,
+                expiresAt: new Date(Date.now() + config_1.config.emailVerificationExpiry),
+            },
+        });
+        // Send verification email
+        const verifyUrl = `${config_1.config.frontendUrl}/verify-email?token=${verifyToken}`;
+        const emailContent = (0, email_1.buildVerificationEmail)(verifyUrl);
+        try {
+            await (0, email_1.getEmailProvider)().send({ ...emailContent, to: user.email });
+        }
+        catch (emailError) {
+            console.error('Failed to send verification email:', emailError);
+            // Don't fail registration if email fails
+        }
+        // Create session
+        const { raw: sessionToken, hash: sessionHash } = (0, tokens_1.generateSessionToken)();
+        await prisma_1.prisma.session.create({
+            data: {
+                userId: user.id,
+                tokenHash: sessionHash,
+                expiresAt: new Date(Date.now() + config_1.config.sessionMaxAge),
+                ipAddress: req.ip || null,
+                userAgent: req.headers['user-agent']?.substring(0, 512) || null,
+            },
+        });
+        (0, auth_1.setSessionCookie)(res, sessionToken);
+        res.status(201).json({
+            success: true,
+            data: { user: serializeUser(user) },
+        });
+    }
+    catch (error) {
+        console.error('Registration error:', error);
+        res.status(500).json({
+            success: false,
+            error: { code: 'INTERNAL_ERROR', message: 'An internal error occurred' },
+        });
+    }
+});
+// ─── POST /api/auth/login ────────────────────────────────────────────────────
+router.post('/login', (0, validate_1.validate)(shared_import_1.loginSchema), async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        const emailNormalized = email.toLowerCase().trim();
+        const user = await prisma_1.prisma.user.findUnique({
+            where: { emailNormalized },
+        });
+        if (!user) {
+            // Generic error to prevent enumeration
+            res.status(401).json({
+                success: false,
+                error: { code: 'INVALID_CREDENTIALS', message: 'Invalid email or password' },
+            });
+            return;
+        }
+        if (user.accountStatus !== 'ACTIVE') {
+            res.status(403).json({
+                success: false,
+                error: { code: 'ACCOUNT_SUSPENDED', message: 'This account is not active' },
+            });
+            return;
+        }
+        const valid = await (0, password_1.verifyPassword)(user.passwordHash, password);
+        if (!valid) {
+            res.status(401).json({
+                success: false,
+                error: { code: 'INVALID_CREDENTIALS', message: 'Invalid email or password' },
+            });
+            return;
+        }
+        // Create session
+        const { raw: sessionToken, hash: sessionHash } = (0, tokens_1.generateSessionToken)();
+        await prisma_1.prisma.session.create({
+            data: {
+                userId: user.id,
+                tokenHash: sessionHash,
+                expiresAt: new Date(Date.now() + config_1.config.sessionMaxAge),
+                ipAddress: req.ip || null,
+                userAgent: req.headers['user-agent']?.substring(0, 512) || null,
+            },
+        });
+        (0, auth_1.setSessionCookie)(res, sessionToken);
+        res.json({
+            success: true,
+            data: { user: serializeUser(user) },
+        });
+    }
+    catch (error) {
+        console.error('Login error:', error);
+        res.status(500).json({
+            success: false,
+            error: { code: 'INTERNAL_ERROR', message: 'An internal error occurred' },
+        });
+    }
+});
+// ─── POST /api/auth/logout ───────────────────────────────────────────────────
+router.post('/logout', auth_1.authMiddleware, async (req, res) => {
+    try {
+        if (req.sessionId) {
+            await prisma_1.prisma.session.delete({ where: { id: req.sessionId } }).catch(() => { });
+        }
+        (0, auth_1.clearSessionCookie)(res);
+        res.json({ success: true });
+    }
+    catch (error) {
+        console.error('Logout error:', error);
+        (0, auth_1.clearSessionCookie)(res);
+        res.json({ success: true });
+    }
+});
+// ─── GET /api/auth/me ────────────────────────────────────────────────────────
+router.get('/me', auth_1.authMiddleware, async (req, res) => {
+    try {
+        const user = await prisma_1.prisma.user.findUnique({
+            where: { id: req.userId },
+        });
+        if (!user) {
+            res.status(404).json({
+                success: false,
+                error: { code: 'USER_NOT_FOUND', message: 'User not found' },
+            });
+            return;
+        }
+        res.json({
+            success: true,
+            data: { user: serializeUser(user) },
+        });
+    }
+    catch (error) {
+        console.error('Get user error:', error);
+        res.status(500).json({
+            success: false,
+            error: { code: 'INTERNAL_ERROR', message: 'An internal error occurred' },
+        });
+    }
+});
+// ─── POST /api/auth/verify-email ─────────────────────────────────────────────
+router.post('/verify-email', (0, validate_1.validate)(shared_import_1.verifyEmailSchema), async (req, res) => {
+    try {
+        const { token } = req.body;
+        const tokenHash = (0, tokens_1.hashToken)(token);
+        const verificationToken = await prisma_1.prisma.emailVerificationToken.findUnique({
+            where: { tokenHash },
+            include: { user: true },
+        });
+        if (!verificationToken) {
+            res.status(400).json({
+                success: false,
+                error: { code: 'INVALID_TOKEN', message: 'Invalid or expired verification link' },
+            });
+            return;
+        }
+        if (verificationToken.usedAt) {
+            res.status(400).json({
+                success: false,
+                error: { code: 'TOKEN_USED', message: 'This verification link has already been used' },
+            });
+            return;
+        }
+        if (verificationToken.expiresAt < new Date()) {
+            res.status(400).json({
+                success: false,
+                error: { code: 'TOKEN_EXPIRED', message: 'This verification link has expired' },
+            });
+            return;
+        }
+        // Mark verified atomically
+        await prisma_1.prisma.$transaction([
+            prisma_1.prisma.user.update({
+                where: { id: verificationToken.userId },
+                data: { emailVerified: true },
+            }),
+            prisma_1.prisma.emailVerificationToken.update({
+                where: { id: verificationToken.id },
+                data: { usedAt: new Date() },
+            }),
+        ]);
+        res.json({
+            success: true,
+            data: { message: 'Email verified successfully' },
+        });
+    }
+    catch (error) {
+        console.error('Email verification error:', error);
+        res.status(500).json({
+            success: false,
+            error: { code: 'INTERNAL_ERROR', message: 'An internal error occurred' },
+        });
+    }
+});
+// ─── POST /api/auth/resend-verification ──────────────────────────────────────
+router.post('/resend-verification', auth_1.authMiddleware, async (req, res) => {
+    try {
+        const user = await prisma_1.prisma.user.findUnique({
+            where: { id: req.userId },
+        });
+        if (!user) {
+            res.json({ success: true, data: { message: 'If an account exists, a verification email will be sent' } });
+            return;
+        }
+        if (user.emailVerified) {
+            res.status(400).json({
+                success: false,
+                error: { code: 'ALREADY_VERIFIED', message: 'Email is already verified' },
+            });
+            return;
+        }
+        // Check cooldown
+        const recentToken = await prisma_1.prisma.emailVerificationToken.findFirst({
+            where: {
+                userId: user.id,
+                createdAt: { gte: new Date(Date.now() - config_1.config.resendCooldown) },
+            },
+        });
+        if (recentToken) {
+            res.status(429).json({
+                success: false,
+                error: { code: 'RATE_LIMITED', message: 'Please wait before requesting another verification email' },
+            });
+            return;
+        }
+        // Generate new token
+        const { raw: verifyToken, hash: verifyHash } = (0, tokens_1.generateToken)();
+        await prisma_1.prisma.emailVerificationToken.create({
+            data: {
+                userId: user.id,
+                tokenHash: verifyHash,
+                expiresAt: new Date(Date.now() + config_1.config.emailVerificationExpiry),
+            },
+        });
+        const verifyUrl = `${config_1.config.frontendUrl}/verify-email?token=${verifyToken}`;
+        const emailContent = (0, email_1.buildVerificationEmail)(verifyUrl);
+        await (0, email_1.getEmailProvider)().send({ ...emailContent, to: user.email });
+        res.json({
+            success: true,
+            data: { message: 'Verification email sent' },
+        });
+    }
+    catch (error) {
+        console.error('Resend verification error:', error);
+        res.status(500).json({
+            success: false,
+            error: { code: 'INTERNAL_ERROR', message: 'An internal error occurred' },
+        });
+    }
+});
+// ─── POST /api/auth/forgot-password ──────────────────────────────────────────
+router.post('/forgot-password', (0, validate_1.validate)(shared_import_1.forgotPasswordSchema), async (req, res) => {
+    try {
+        const { email } = req.body;
+        const emailNormalized = email.toLowerCase().trim();
+        // Always return success to prevent enumeration
+        const genericResponse = {
+            success: true,
+            data: { message: 'If an account with that email exists, a password reset link has been sent' },
+        };
+        const user = await prisma_1.prisma.user.findUnique({
+            where: { emailNormalized },
+        });
+        if (!user) {
+            res.json(genericResponse);
+            return;
+        }
+        // Check cooldown
+        const recentToken = await prisma_1.prisma.passwordResetToken.findFirst({
+            where: {
+                userId: user.id,
+                createdAt: { gte: new Date(Date.now() - config_1.config.resendCooldown) },
+            },
+        });
+        if (recentToken) {
+            // Still return generic success to prevent enumeration
+            res.json(genericResponse);
+            return;
+        }
+        // Generate reset token
+        const { raw: resetToken, hash: resetHash } = (0, tokens_1.generateToken)();
+        await prisma_1.prisma.passwordResetToken.create({
+            data: {
+                userId: user.id,
+                tokenHash: resetHash,
+                expiresAt: new Date(Date.now() + config_1.config.passwordResetExpiry),
+            },
+        });
+        const resetUrl = `${config_1.config.frontendUrl}/reset-password?token=${resetToken}`;
+        const emailContent = (0, email_1.buildPasswordResetEmail)(resetUrl);
+        try {
+            await (0, email_1.getEmailProvider)().send({ ...emailContent, to: user.email });
+        }
+        catch (emailError) {
+            console.error('Failed to send reset email:', emailError);
+        }
+        res.json(genericResponse);
+    }
+    catch (error) {
+        console.error('Forgot password error:', error);
+        res.status(500).json({
+            success: false,
+            error: { code: 'INTERNAL_ERROR', message: 'An internal error occurred' },
+        });
+    }
+});
+// ─── POST /api/auth/reset-password ───────────────────────────────────────────
+router.post('/reset-password', (0, validate_1.validate)(shared_import_1.resetPasswordSchema), async (req, res) => {
+    try {
+        const { token, password } = req.body;
+        const tokenHash = (0, tokens_1.hashToken)(token);
+        const resetToken = await prisma_1.prisma.passwordResetToken.findUnique({
+            where: { tokenHash },
+            include: { user: true },
+        });
+        if (!resetToken) {
+            res.status(400).json({
+                success: false,
+                error: { code: 'INVALID_TOKEN', message: 'Invalid or expired reset link' },
+            });
+            return;
+        }
+        if (resetToken.usedAt) {
+            res.status(400).json({
+                success: false,
+                error: { code: 'TOKEN_USED', message: 'This reset link has already been used' },
+            });
+            return;
+        }
+        if (resetToken.expiresAt < new Date()) {
+            res.status(400).json({
+                success: false,
+                error: { code: 'TOKEN_EXPIRED', message: 'This reset link has expired' },
+            });
+            return;
+        }
+        const passwordHash = await (0, password_1.hashPassword)(password);
+        // Reset password and invalidate all sessions atomically
+        await prisma_1.prisma.$transaction([
+            prisma_1.prisma.user.update({
+                where: { id: resetToken.userId },
+                data: { passwordHash },
+            }),
+            prisma_1.prisma.passwordResetToken.update({
+                where: { id: resetToken.id },
+                data: { usedAt: new Date() },
+            }),
+            prisma_1.prisma.session.deleteMany({
+                where: { userId: resetToken.userId },
+            }),
+        ]);
+        res.json({
+            success: true,
+            data: { message: 'Password reset successfully. Please sign in with your new password.' },
+        });
+    }
+    catch (error) {
+        console.error('Reset password error:', error);
+        res.status(500).json({
+            success: false,
+            error: { code: 'INTERNAL_ERROR', message: 'An internal error occurred' },
+        });
+    }
+});
+exports.default = router;
+//# sourceMappingURL=auth.js.map

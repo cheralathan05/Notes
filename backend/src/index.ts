@@ -1,0 +1,118 @@
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
+import rateLimit from 'express-rate-limit';
+import { config, validateEnv } from './config';
+import authRoutes from './routes/auth';
+import userRoutes from './routes/user';
+import documentRoutes from './routes/documents';
+import folderRoutes from './routes/folders';
+import revisionRoutes from './routes/revisions';
+import templateRoutes from './routes/templates';
+import attachmentRoutes from './routes/attachments';
+import searchRoutes from './routes/search';
+import aiRoutes from './routes/ai';
+import collaborationRoutes from './routes/collaboration';
+import exportImportRoutes from './routes/export-import';
+import taskRoutes from './routes/tasks';
+
+// Validate environment before starting
+validateEnv();
+
+const app = express();
+
+// ─── Security middleware ─────────────────────────────────────────────────────
+
+app.use(helmet({
+  contentSecurityPolicy: false, // CSP handled by frontend
+}));
+
+app.use(cors({
+  origin: config.corsOrigin,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
+app.use(cookieParser());
+app.use(express.json({ limit: '10mb' }));
+
+// Trust proxy for rate limiting behind reverse proxy
+app.set('trust proxy', 1);
+
+// ─── Rate limiting ───────────────────────────────────────────────────────────
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20,                  // 20 requests per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    error: { code: 'RATE_LIMITED', message: 'Too many requests, please try again later' },
+  },
+});
+
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// ─── Routes ──────────────────────────────────────────────────────────────────
+
+// Health check
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Auth routes with rate limiting
+app.use('/api/auth', authLimiter, authRoutes);
+
+// User routes
+app.use('/api/user', generalLimiter, userRoutes);
+
+// Documents Platform routes
+app.use('/api/documents', generalLimiter, exportImportRoutes);
+app.use('/api/documents', generalLimiter, revisionRoutes);
+app.use('/api/documents', generalLimiter, attachmentRoutes);
+app.use('/api/documents', generalLimiter, documentRoutes);
+app.use('/api/documents', generalLimiter, collaborationRoutes);
+app.use('/api/folders', generalLimiter, folderRoutes);
+app.use('/api/templates', generalLimiter, templateRoutes);
+app.use('/api/attachments', generalLimiter, attachmentRoutes);
+app.use('/api/search', generalLimiter, searchRoutes);
+app.use('/api/ai', generalLimiter, aiRoutes);
+app.use('/api/tasks', generalLimiter, taskRoutes);
+app.use('/api', generalLimiter, collaborationRoutes); // Public share endpoint: /api/public/documents/:token
+
+
+// ─── Error handling ──────────────────────────────────────────────────────────
+
+app.use((_req, res) => {
+  res.status(404).json({
+    success: false,
+    error: { code: 'NOT_FOUND', message: 'Route not found' },
+  });
+});
+
+app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({
+    success: false,
+    error: { code: 'INTERNAL_ERROR', message: 'An internal error occurred' },
+  });
+});
+
+// ─── Start server ────────────────────────────────────────────────────────────
+
+app.listen(config.port, () => {
+  console.log(`\n🚀 Backend server running on http://localhost:${config.port}`);
+  console.log(`   Environment: ${config.nodeEnv}`);
+  console.log(`   Frontend URL: ${config.frontendUrl}`);
+  console.log(`   Email Provider: ${config.emailProvider}\n`);
+});
+
+export default app;
