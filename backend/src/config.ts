@@ -1,5 +1,10 @@
 import dotenv from 'dotenv';
-dotenv.config({ path: '../.env' });
+import path from 'path';
+
+// Load .env files from both project root and backend directory reliably regardless of cwd
+dotenv.config({ path: path.resolve(__dirname, '../../.env'), override: true });
+dotenv.config({ path: path.resolve(__dirname, '../.env'), override: true });
+dotenv.config({ override: true });
 
 const requiredVars = ['DATABASE_URL', 'SESSION_SECRET'];
 
@@ -25,13 +30,19 @@ export const config = {
   sessionMaxAge: parseInt(process.env.SESSION_MAX_AGE || String(7 * 24 * 60 * 60 * 1000), 10), // 7 days
 
   // URLs
-  appBaseUrl: process.env.APP_BASE_URL || 'http://localhost:3000',
+  appBaseUrl: process.env.APP_BASE_URL || process.env.APP_URL || 'http://localhost:3000',
   apiBaseUrl: process.env.API_BASE_URL || 'http://localhost:4000',
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
 
-  // Email
-  emailProvider: process.env.EMAIL_PROVIDER || 'console',
-  emailFrom: process.env.EMAIL_FROM || 'noreply@workspace.app',
+  // Email & SMTP
+  emailProvider: process.env.EMAIL_PROVIDER || (process.env.SMTP_USER ? 'smtp' : 'console'),
+  emailFrom: process.env.EMAIL_FROM || process.env.SMTP_USER || 'noreply@workspace.app',
+  smtpService: process.env.SMTP_SERVICE,
+  smtpHost: process.env.SMTP_HOST || 'smtp.gmail.com',
+  smtpPort: parseInt(process.env.SMTP_PORT || '587', 10),
+  smtpSecure: process.env.SMTP_SECURE === 'true' || process.env.SMTP_PORT === '465',
+  smtpUser: process.env.SMTP_USER || '',
+  smtpPass: process.env.SMTP_PASS || '',
 
   // Tokens
   emailVerificationExpiry: 24 * 60 * 60 * 1000, // 24 hours
@@ -41,3 +52,4 @@ export const config = {
   // CORS
   corsOrigin: process.env.FRONTEND_URL || 'http://localhost:3000',
 } as const;
+

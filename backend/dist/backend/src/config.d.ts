@@ -11,6 +11,12 @@ export declare const config: {
     readonly frontendUrl: string;
     readonly emailProvider: string;
     readonly emailFrom: string;
+    readonly smtpService: string | undefined;
+    readonly smtpHost: string;
+    readonly smtpPort: number;
+    readonly smtpSecure: boolean;
+    readonly smtpUser: string;
+    readonly smtpPass: string;
     readonly emailVerificationExpiry: number;
     readonly passwordResetExpiry: number;
     readonly resendCooldown: number;

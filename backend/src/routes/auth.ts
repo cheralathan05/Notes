@@ -113,7 +113,7 @@ router.post('/register', validate(registerSchema), async (req: Request, res: Res
 
     res.status(201).json({
       success: true,
-      data: { user: serializeUser(user) },
+      data: { user: serializeUser(user), token: sessionToken },
     });
   } catch (error) {
     console.error('Registration error:', error);
@@ -177,7 +177,7 @@ router.post('/login', validate(loginSchema), async (req: Request, res: Response)
 
     res.json({
       success: true,
-      data: { user: serializeUser(user) },
+      data: { user: serializeUser(user), token: sessionToken },
     });
   } catch (error) {
     console.error('Login error:', error);

@@ -1,7 +1,10 @@
 // Frontend API client for communicating with the backend
 import type { ApiResponse } from './types';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+const rawApiUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000').trim().replace(/\/+$/, '');
+export const API_BASE_URL = rawApiUrl.startsWith('http://') || rawApiUrl.startsWith('https://')
+  ? rawApiUrl
+  : `https://${rawApiUrl}`;
 
 class ApiClient {
   private baseUrl: string;
@@ -508,6 +511,7 @@ class ApiClient {
   ) {
     return this.request<{
       invitation: { id: string; recipientEmail: string; role: DocumentRoleType; expiresAt: string; status: string };
+      emailSent?: boolean;
       message: string;
     }>(`/api/documents/${documentId}/invitations`, {
       method: 'POST',
@@ -516,7 +520,7 @@ class ApiClient {
   }
 
   async resendInvitation(documentId: string, invitationId: string) {
-    return this.request<{ invitation: any; message: string }>(
+    return this.request<{ invitation: any; emailSent?: boolean; message: string }>(
       `/api/documents/${documentId}/invitations/${invitationId}/resend`,
       { method: 'POST' }
     );
@@ -786,6 +790,295 @@ class ApiClient {
     return this.request<{ suggestions: Array<{ text: string; description: string; category: string }> }>(
       `/api/tasks/terminal/suggestions?q=${encodeURIComponent(q)}`
     );
+  }
+
+  // ─── Notifications API ───────────────────────────────────────────────────
+
+  async getNotifications(options: { unreadOnly?: boolean; limit?: number; offset?: number } = {}) {
+    const params = new URLSearchParams();
+    if (options.unreadOnly) params.set('unreadOnly', 'true');
+    if (options.limit) params.set('limit', String(options.limit));
+    if (options.offset) params.set('offset', String(options.offset));
+    const qs = params.toString();
+    return this.request<{ notifications: NotificationItem[]; total: number; unreadCount: number }>(
+      `/api/notifications${qs ? `?${qs}` : ''}`
+    );
+  }
+
+  async markNotificationRead(id: string) {
+    return this.request<{ notification: NotificationItem }>(`/api/notifications/${id}/read`, {
+      method: 'PATCH',
+    });
+  }
+
+  async markAllNotificationsRead() {
+    return this.request<{ count: number }>('/api/notifications/mark-all-read', {
+      method: 'POST',
+    });
+  }
+
+  // ─── Focus & Time Tracking API ─────────────────────────────────────────────
+
+  async getActiveFocusSession() {
+    return this.request<{ session: FocusSessionItem | null }>('/api/focus/active');
+  }
+
+  async startFocusSession(data: { taskId?: string; title: string; targetMinutes?: number }) {
+    return this.request<{ session: FocusSessionItem }>('/api/focus/start', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async pauseFocusSession(id: string) {
+    return this.request<{ session: FocusSessionItem }>(`/api/focus/${id}/pause`, {
+      method: 'POST',
+    });
+  }
+
+  async resumeFocusSession(id: string) {
+    return this.request<{ session: FocusSessionItem }>(`/api/focus/${id}/resume`, {
+      method: 'POST',
+    });
+  }
+
+  async completeFocusSession(id: string, notes?: string) {
+    return this.request<{ session: FocusSessionItem }>(`/api/focus/${id}/complete`, {
+      method: 'POST',
+      body: JSON.stringify({ notes }),
+    });
+  }
+
+  async getFocusTotals() {
+    return this.request<{ todayMinutes: number; todayHours: number; weekMinutes: number; weekHours: number }>(
+      '/api/focus/totals'
+    );
+  }
+
+  async getTimeEntries(options: { taskId?: string; projectId?: string } = {}) {
+    const params = new URLSearchParams();
+    if (options.taskId) params.set('taskId', options.taskId);
+    if (options.projectId) params.set('projectId', options.projectId);
+    const qs = params.toString();
+    return this.request<{ entries: TimeEntryItem[] }>(`/api/focus/entries${qs ? `?${qs}` : ''}`);
+  }
+
+  // ─── Goals API ─────────────────────────────────────────────────────────────
+
+  async getGoals(status?: string, category?: string) {
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    if (category) params.set('category', category);
+    const qs = params.toString();
+    return this.request<{ goals: GoalItem[] }>(`/api/goals${qs ? `?${qs}` : ''}`);
+  }
+
+  async createGoal(data: {
+    title: string;
+    description?: string;
+    category?: string;
+    targetValue?: number;
+    currentValue?: number;
+    unit?: string;
+    targetDate?: string;
+    projectId?: string;
+  }) {
+    return this.request<{ goal: GoalItem }>('/api/goals', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async checkInGoal(id: string, data: { newValue: number; note?: string }) {
+    return this.request<{ goal: GoalItem; checkIn: any }>(`/api/goals/${id}/check-in`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteGoal(id: string) {
+    return this.request<{ deleted: boolean }>(`/api/goals/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // ─── Automations API ───────────────────────────────────────────────────────
+
+  async getAutomations() {
+    return this.request<{ automations: AutomationItem[] }>('/api/automations');
+  }
+
+  async createAutomation(data: {
+    name: string;
+    description?: string;
+    triggerType: string;
+    triggerConfig?: any;
+    conditions?: Array<{ field: string; operator: string; value: any }>;
+    actions: Array<{ type: string; params: any }>;
+    isEnabled?: boolean;
+  }) {
+    return this.request<{ automation: AutomationItem }>('/api/automations', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async toggleAutomation(id: string, isEnabled: boolean) {
+    return this.request<{ automation: AutomationItem }>(`/api/automations/${id}/toggle`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isEnabled }),
+    });
+  }
+
+  async deleteAutomation(id: string) {
+    return this.request<{ deleted: boolean }>(`/api/automations/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // ─── Analytics & Command Center API ────────────────────────────────────────
+
+  async getDailyCommandCenter() {
+    return this.request<DailyCommandCenterData>('/api/analytics/command-center');
+  }
+
+  async getWorkspaceAnalytics() {
+    return this.request<WorkspaceAnalyticsData>('/api/analytics/workspace');
+  }
+
+  // ─── Project Atlas Developer Workspace API ──────────────────────────────────
+
+  async claimTask(taskId: string, leaseMinutes = 120) {
+    return this.request<{ task: TaskItem; message: string }>(`/api/tasks/${taskId}/claim`, {
+      method: 'POST',
+      body: JSON.stringify({ leaseMinutes }),
+    });
+  }
+
+  async releaseTask(taskId: string) {
+    return this.request<{ task: TaskItem; message: string }>(`/api/tasks/${taskId}/release`, {
+      method: 'POST',
+    });
+  }
+
+  async updateTaskCriteria(taskId: string, criteria: Array<{ id: string; text: string; isCompleted: boolean }>) {
+    return this.request<{ task: TaskItem }>(`/api/tasks/${taskId}/criteria`, {
+      method: 'PATCH',
+      body: JSON.stringify({ criteria }),
+    });
+  }
+
+  async submitEvidence(taskId: string, evidence: {
+    command: string;
+    exitCode: number;
+    stdoutSnippet?: string;
+    stderrSnippet?: string;
+    commitHash?: string;
+    branch?: string;
+    changedFiles?: string[];
+    pullRequestUrl?: string;
+  }) {
+    return this.request<{
+      evidence: TaskEvidenceItem;
+      isVerified: boolean;
+      status: TaskStatusType;
+      missingCriteria: string[];
+      message: string;
+    }>(`/api/tasks/${taskId}/evidence`, {
+      method: 'POST',
+      body: JSON.stringify(evidence),
+    });
+  }
+
+  async getTaskEvidence(taskId: string) {
+    return this.request<{ evidence: TaskEvidenceItem[] }>(`/api/tasks/${taskId}/evidence`);
+  }
+
+  async listRepositories(workspaceId?: string) {
+    const qs = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : '';
+    return this.request<{ repositories: RepositoryItem[] }>(`/api/repositories${qs}`);
+  }
+
+  async createRepository(data: {
+    name: string;
+    slug?: string;
+    gitUrl?: string;
+    defaultBranch?: string;
+    localPath?: string;
+    projectId?: string;
+    description?: string;
+    workspaceId?: string;
+  }) {
+    return this.request<{ repository: RepositoryItem }>('/api/repositories', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteRepository(id: string) {
+    return this.request<{ message: string }>(`/api/repositories/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async listDeveloperTokens() {
+    return this.request<{ tokens: DeveloperTokenItem[] }>('/api/developer/tokens');
+  }
+
+  async getDeveloperTokens() {
+    return this.listDeveloperTokens();
+  }
+
+  async createDeveloperToken(
+    nameOrOptions: string | { name?: string; expiresInDays?: number } = 'Developer CLI Token',
+    expiresInDaysParam = 90
+  ) {
+    let name = 'Developer CLI Token';
+    let expiresInDays = expiresInDaysParam;
+
+    if (typeof nameOrOptions === 'string') {
+      name = nameOrOptions;
+    } else if (nameOrOptions && typeof nameOrOptions === 'object') {
+      if (nameOrOptions.name) name = nameOrOptions.name;
+      if (nameOrOptions.expiresInDays) expiresInDays = nameOrOptions.expiresInDays;
+    }
+
+    return this.request<{
+      token: string;
+      rawToken?: string;
+      tokenRecord: DeveloperTokenItem;
+      instructions: string;
+    }>('/api/developer/tokens', {
+      method: 'POST',
+      body: JSON.stringify({ name, expiresInDays }),
+    });
+  }
+
+  async revokeDeveloperToken(id: string) {
+    return this.request<{ message: string }>(`/api/developer/tokens/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getAiCodingPlan(taskId: string) {
+    return this.request<{ codingPlan: any }>('/api/ai/coding-plan', {
+      method: 'POST',
+      body: JSON.stringify({ taskId }),
+    });
+  }
+
+  async getAiPrDraft(taskId: string, commitHash?: string, branch?: string) {
+    return this.request<{ pullRequestDraft: any }>('/api/ai/pr-draft', {
+      method: 'POST',
+      body: JSON.stringify({ taskId, commitHash, branch }),
+    });
+  }
+
+  async getAiHandoffSummary(taskId: string) {
+    return this.request<{ handoffSummary: any }>('/api/ai/handoff-summary', {
+      method: 'POST',
+      body: JSON.stringify({ taskId }),
+    });
   }
 }
 
@@ -1064,8 +1357,64 @@ export interface TaskItem {
   subtasks?: any[];
   checklists?: TaskChecklistItemType[];
   comments?: TaskCommentItemType[];
+  repositoryId?: string | null;
+  repository?: { id: string; name: string; defaultBranch?: string };
+  branchName?: string | null;
+  acceptanceCriteria?: Array<{ id: string; text: string; isCompleted: boolean }>;
+  claimedById?: string | null;
+  claimedBy?: { id: string; displayName: string; email: string };
+  claimedAt?: string | null;
+  leaseExpiresAt?: string | null;
+  isVerified?: boolean;
+  verifiedAt?: string | null;
+  evidence?: TaskEvidenceItem[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TaskEvidenceItem {
+  id: string;
+  taskId: string;
+  userId: string;
+  command: string;
+  exitCode: number;
+  stdoutSnippet?: string | null;
+  stderrSnippet?: string | null;
+  commitHash?: string | null;
+  branch?: string | null;
+  changedFiles?: string[] | null;
+  pullRequestUrl?: string | null;
+  status: 'PASSED' | 'FAILED';
+  executedAt: string;
+  createdAt?: string;
+  user?: { id: string; displayName: string; email: string };
+}
+
+export interface RepositoryItem {
+  id: string;
+  workspaceId: string;
+  projectId?: string | null;
+  name: string;
+  slug: string;
+  gitUrl?: string | null;
+  defaultBranch: string;
+  localPath?: string | null;
+  description?: string | null;
+  project?: { id: string; name: string; color?: string | null };
+  _count?: { tasks: number };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DeveloperTokenItem {
+  id: string;
+  name: string;
+  tokenPrefix?: string;
+  workspaceId: string;
+  workspace?: { name: string; slug: string };
+  lastUsedAt?: string | null;
+  expiresAt?: string | null;
+  createdAt: string;
 }
 
 export interface ProjectItem {
@@ -1113,7 +1462,178 @@ export interface TerminalExecutionData {
   timestamp: string;
 }
 
+export interface NotificationItem {
+  id: string;
+  workspaceId: string;
+  recipientId: string;
+  actorId?: string | null;
+  type: string;
+  title: string;
+  message: string;
+  linkUrl?: string | null;
+  isRead: boolean;
+  readAt?: string | null;
+  createdAt: string;
+  actor?: { id: string; displayName: string; email: string; avatarUrl?: string | null } | null;
+}
+
+export interface FocusSessionItem {
+  id: string;
+  workspaceId: string;
+  userId: string;
+  taskId?: string | null;
+  title: string;
+  targetMinutes: number;
+  actualSeconds: number;
+  status: 'RUNNING' | 'PAUSED' | 'COMPLETED' | 'CANCELLED';
+  startedAt: string;
+  endedAt?: string | null;
+  notes?: string | null;
+  task?: { id: string; title: string; priority: string; status: string } | null;
+}
+
+export interface TimeEntryItem {
+  id: string;
+  workspaceId: string;
+  userId: string;
+  taskId?: string | null;
+  projectId?: string | null;
+  durationSeconds: number;
+  startedAt: string;
+  endedAt: string;
+  description?: string | null;
+  isManual: boolean;
+  task?: { id: string; title: string } | null;
+  project?: { id: string; name: string } | null;
+}
+
+export interface GoalItem {
+  id: string;
+  workspaceId: string;
+  creatorId: string;
+  title: string;
+  description?: string | null;
+  category: string;
+  targetValue: number;
+  currentValue: number;
+  unit: string;
+  status: 'NOT_STARTED' | 'IN_PROGRESS' | 'ACHIEVED' | 'AT_RISK' | 'CANCELLED';
+  startDate?: string | null;
+  targetDate?: string | null;
+  projectId?: string | null;
+  progressPercentage: number;
+  project?: { id: string; name: string; color?: string; progress?: number } | null;
+  creator?: { id: string; displayName: string; email: string };
+  checkIns?: Array<{ id: string; previousValue: number; newValue: number; note?: string; createdAt: string; user?: { id: string; displayName: string } }>;
+}
+
+export interface AutomationItem {
+  id: string;
+  workspaceId: string;
+  creatorId: string;
+  name: string;
+  description?: string | null;
+  triggerType: string;
+  conditions: Array<{ field: string; operator: string; value: any }>;
+  actions: Array<{ type: string; params: any }>;
+  isEnabled: boolean;
+  executionCount: number;
+  lastRunAt?: string | null;
+  createdAt: string;
+  creator?: { id: string; displayName: string };
+  executions?: Array<{ id: string; triggerEvent: string; status: string; executedAt: string; durationMs: number; errorMessage?: string }>;
+}
+
+export interface DailyCommandCenterData {
+  timestamp: string;
+  summary: {
+    totalOpenTasks: number;
+    overdueCount: number;
+    dueTodayCount: number;
+    blockedCount: number;
+    completedTodayCount: number;
+    activeProjectsCount: number;
+  };
+  todayPriorities: TaskItem[];
+  dueTodayTasks: TaskItem[];
+  overdueTasks: TaskItem[];
+  blockedTasks: TaskItem[];
+  completedToday: Array<{ id: string; title: string; completedAt: string; priority: string }>;
+  activeProjects: Array<{
+    id: string;
+    name: string;
+    color?: string | null;
+    health: string;
+    progress: number;
+    totalTasks: number;
+    doneTasks: number;
+    remainingTasks: number;
+    targetDate?: string | null;
+  }>;
+  recentNotes: Array<{
+    id: string;
+    title: string;
+    icon?: string | null;
+    status: string;
+    updatedAt: string;
+    snippet: string;
+  }>;
+  focusTelemetry: {
+    activeSession: FocusSessionItem | null;
+    todayMinutes: number;
+    todayHours: number;
+    weekMinutes: number;
+    weekHours: number;
+  };
+  planningAssistant: {
+    suggestedPlan: Array<{
+      taskId: string;
+      title: string;
+      priority: string;
+      dueDate?: string | null;
+      projectName?: string | null;
+      rationale: string;
+      estimatedMinutes: number;
+    }>;
+    totalPlannedMinutes: number;
+    generatedAt: string;
+  };
+  reviewSummary: {
+    completedTodayCount: number;
+    carriedForwardCount: number;
+    focusLoggedMinutes: number;
+  };
+}
+
+export interface WorkspaceAnalyticsData {
+  summary: {
+    totalTasks: number;
+    completedTasks: number;
+    completionRate: number;
+    overdueCount: number;
+    overdueRate: number;
+    averageCycleHours: number;
+    velocityLast7Days: number;
+    velocityPrevious7Days: number;
+    velocityTrend: number;
+  };
+  statusDistribution: Record<string, number>;
+  priorityDistribution: Record<string, number>;
+  projectsHealth: {
+    onTrack: number;
+    atRisk: number;
+    offTrack: number;
+    total: number;
+  };
+  goalsMetric: {
+    total: number;
+    achieved: number;
+    averageProgress: number;
+  };
+}
+
 export const api = new ApiClient(API_BASE_URL);
+
 
 
 

@@ -48,6 +48,17 @@ export declare const forgotPasswordSchema: z.ZodObject<{
     email: string;
 }>;
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+export declare const verifyResetOtpSchema: z.ZodObject<{
+    email: z.ZodEffects<z.ZodString, string, string>;
+    otp: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    email: string;
+    otp: string;
+}, {
+    email: string;
+    otp: string;
+}>;
+export type VerifyResetOtpInput = z.infer<typeof verifyResetOtpSchema>;
 export declare const resetPasswordSchema: z.ZodEffects<z.ZodObject<{
     token: z.ZodString;
     password: z.ZodString;

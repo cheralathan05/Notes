@@ -10,18 +10,45 @@ interface SSEClient {
 
 class RealtimeHub {
   private clients: Map<string, SSEClient> = new Map();
+  private heartbeatInterval: NodeJS.Timeout | null = null;
+
+  constructor() {
+    this.heartbeatInterval = setInterval(() => {
+      this.sendHeartbeat();
+    }, 25000);
+    if (this.heartbeatInterval.unref) {
+      this.heartbeatInterval.unref();
+    }
+  }
+
+  private sendHeartbeat() {
+    for (const [clientId, client] of this.clients.entries()) {
+      try {
+        client.res.write(': keepalive\n\n');
+      } catch {
+        this.clients.delete(clientId);
+      }
+    }
+  }
 
   addClient(clientId: string, userId: string, workspaceId: string, res: Response) {
     this.clients.set(clientId, { id: clientId, userId, workspaceId, res });
 
-    // Set SSE headers
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders();
+    // Set SSE headers if not already sent
+    if (!res.headersSent) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders?.();
+    }
 
     // Send connection handshake
-    res.write(`data: ${JSON.stringify({ type: 'CONNECTED', clientId, timestamp: new Date().toISOString() })}\n\n`);
+    try {
+      res.write(`data: ${JSON.stringify({ type: 'CONNECTED', clientId, timestamp: new Date().toISOString() })}\n\n`);
+    } catch {
+      this.clients.delete(clientId);
+    }
 
     // Clean up on disconnect
     res.on('close', () => {
@@ -57,3 +84,7 @@ class RealtimeHub {
 }
 
 export const realtimeHub = new RealtimeHub();
+
+export function broadcastTaskEvent(eventType: string, workspaceId: string, payload: any): void {
+  realtimeHub.broadcast(workspaceId, eventType, payload);
+}

@@ -517,13 +517,17 @@ export function Badge({
   className = '',
 }: {
   children: React.ReactNode;
-  variant?: 'default' | 'active' | 'muted';
+  variant?: 'default' | 'active' | 'muted' | 'success' | 'secondary' | 'warning' | 'destructive';
   className?: string;
 }) {
   const variants = {
     default: 'bg-[#151515] border border-[#2D2D2D] text-[#FAFAFA]',
     active: 'bg-[#FAFAFA] text-[#111111] font-semibold border border-transparent',
     muted: 'bg-[#101010] border border-[#222222] text-[#737373]',
+    secondary: 'bg-[#1F1F1F] border border-[#333333] text-neutral-300',
+    success: 'bg-emerald-950/40 border border-emerald-800/50 text-emerald-300',
+    warning: 'bg-amber-950/40 border border-amber-800/50 text-amber-300',
+    destructive: 'bg-red-950/40 border border-red-800/50 text-red-300',
   };
 
   return (

@@ -91,3 +91,18 @@ The implementation proceeds in strict vertical stages. Every stage is validated 
 - [x] End-to-end automated test script `backend/scripts/test-tasks-os-suite.ts` passed 100%.
 - [x] Quality gates: TypeScript checks (`npx tsc --noEmit` on both frontend & backend passed).
 - [x] Production build verification (`npm run build` on frontend passed).
+
+### Stage 11: Project Atlas — Core Developer Operating System Architecture
+- [x] Dual-channel authentication middleware (supporting HTTP-only session cookies alongside `Authorization: Bearer atlas_dev_...` and `x-atlas-token`).
+- [x] Prisma database models: `DeveloperToken`, `Repository`, `TaskEvidence`, and `Task` lease/criteria/evidence relations.
+- [x] Exclusive task claim lease engine (`POST /api/tasks/:id/claim`, `release`).
+- [x] Acceptance criteria checklist engine (`PATCH /api/tasks/:id/criteria`).
+- [x] Evidence-based completion gating (`POST /api/tasks/:id/evidence`) enforcing exit code 0 and all criteria satisfied.
+- [x] AI Developer Assistant endpoints: coding plan, PR draft, handoff summaries.
+
+### Stage 12: Multi-Interface Delivery & Interactive Terminal TUI
+- [x] **Web Application**: Repositories management dashboard (`/repositories`), Developer Token modal (`DeveloperTokenModal`), Task Detail Panel with Criteria & Evidence tabs, real-time SSE updates.
+- [x] **Interactive Terminal TUI**: Full-screen interactive application in `cli/src/tui/terminal-app.ts` launched via `product` or `atlas` with interactive login, registration, dashboard, task browser, check runner, and evidence submission.
+- [x] **Developer CLI**: Full command-line tool with Git metadata detection, `atlas login`, `atlas connect`, `atlas task submit`, and `atlas doctor`.
+- [x] **VS Code Extension**: Native `atlas-vscode` package with TreeDataProvider, status bar actions, check execution, and evidence submission.
+- [x] Automated integration suite `test-developer-platform-suite.ts` passed 17/17 (100%).

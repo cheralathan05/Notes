@@ -1,4 +1,7 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const prisma_1 = require("../lib/prisma");
@@ -8,6 +11,7 @@ const email_1 = require("../lib/email");
 const auth_1 = require("../middleware/auth");
 const validate_1 = require("../middleware/validate");
 const config_1 = require("../config");
+const crypto_1 = __importDefault(require("crypto"));
 const shared_import_1 = require("../../shared-import");
 const router = (0, express_1.Router)();
 // ─── Helper: safe user serialization ─────────────────────────────────────────
@@ -86,7 +90,7 @@ router.post('/register', (0, validate_1.validate)(shared_import_1.registerSchema
         (0, auth_1.setSessionCookie)(res, sessionToken);
         res.status(201).json({
             success: true,
-            data: { user: serializeUser(user) },
+            data: { user: serializeUser(user), token: sessionToken },
         });
     }
     catch (error) {
@@ -142,7 +146,7 @@ router.post('/login', (0, validate_1.validate)(shared_import_1.loginSchema), asy
         (0, auth_1.setSessionCookie)(res, sessionToken);
         res.json({
             success: true,
-            data: { user: serializeUser(user) },
+            data: { user: serializeUser(user), token: sessionToken },
         });
     }
     catch (error) {
@@ -309,10 +313,10 @@ router.post('/forgot-password', (0, validate_1.validate)(shared_import_1.forgotP
     try {
         const { email } = req.body;
         const emailNormalized = email.toLowerCase().trim();
-        // Always return success to prevent enumeration
+        // Generic response to avoid account enumeration
         const genericResponse = {
             success: true,
-            data: { message: 'If an account with that email exists, a password reset link has been sent' },
+            data: { message: 'If an account with that email exists, a password reset code has been sent.' },
         };
         const user = await prisma_1.prisma.user.findUnique({
             where: { emailNormalized },
@@ -329,21 +333,24 @@ router.post('/forgot-password', (0, validate_1.validate)(shared_import_1.forgotP
             },
         });
         if (recentToken) {
-            // Still return generic success to prevent enumeration
             res.json(genericResponse);
             return;
         }
-        // Generate reset token
+        // Generate 6-digit OTP and recovery token
+        const otp = crypto_1.default.randomInt(100000, 999999).toString();
+        const otpHash = (0, tokens_1.hashToken)(otp);
         const { raw: resetToken, hash: resetHash } = (0, tokens_1.generateToken)();
         await prisma_1.prisma.passwordResetToken.create({
             data: {
                 userId: user.id,
                 tokenHash: resetHash,
-                expiresAt: new Date(Date.now() + config_1.config.passwordResetExpiry),
+                otpHash,
+                attempts: 0,
+                expiresAt: new Date(Date.now() + 15 * 60 * 1000), // 15-minute OTP lifetime
             },
         });
         const resetUrl = `${config_1.config.frontendUrl}/reset-password?token=${resetToken}`;
-        const emailContent = (0, email_1.buildPasswordResetEmail)(resetUrl);
+        const emailContent = (0, email_1.buildPasswordResetEmail)(resetUrl, otp);
         try {
             await (0, email_1.getEmailProvider)().send({ ...emailContent, to: user.email });
         }
@@ -360,33 +367,122 @@ router.post('/forgot-password', (0, validate_1.validate)(shared_import_1.forgotP
         });
     }
 });
-// ─── POST /api/auth/reset-password ───────────────────────────────────────────
-router.post('/reset-password', (0, validate_1.validate)(shared_import_1.resetPasswordSchema), async (req, res) => {
+// ─── POST /api/auth/verify-reset-otp ─────────────────────────────────────────
+router.post('/verify-reset-otp', (0, validate_1.validate)(shared_import_1.verifyResetOtpSchema), async (req, res) => {
     try {
-        const { token, password } = req.body;
-        const tokenHash = (0, tokens_1.hashToken)(token);
-        const resetToken = await prisma_1.prisma.passwordResetToken.findUnique({
-            where: { tokenHash },
-            include: { user: true },
+        const { email, otp } = req.body;
+        const emailNormalized = email.toLowerCase().trim();
+        const user = await prisma_1.prisma.user.findUnique({
+            where: { emailNormalized },
         });
-        if (!resetToken) {
+        if (!user) {
             res.status(400).json({
                 success: false,
-                error: { code: 'INVALID_TOKEN', message: 'Invalid or expired reset link' },
+                error: { code: 'INVALID_OTP', message: 'Invalid or expired verification code' },
             });
             return;
         }
-        if (resetToken.usedAt) {
+        const resetToken = await prisma_1.prisma.passwordResetToken.findFirst({
+            where: {
+                userId: user.id,
+                usedAt: null,
+            },
+            orderBy: { createdAt: 'desc' },
+        });
+        if (!resetToken || !resetToken.otpHash) {
             res.status(400).json({
                 success: false,
-                error: { code: 'TOKEN_USED', message: 'This reset link has already been used' },
+                error: { code: 'INVALID_OTP', message: 'No active password recovery request found' },
             });
             return;
         }
         if (resetToken.expiresAt < new Date()) {
             res.status(400).json({
                 success: false,
-                error: { code: 'TOKEN_EXPIRED', message: 'This reset link has expired' },
+                error: { code: 'OTP_EXPIRED', message: 'Verification code has expired. Please request a new code.' },
+            });
+            return;
+        }
+        if (resetToken.attempts >= 5) {
+            res.status(429).json({
+                success: false,
+                error: { code: 'MAX_ATTEMPTS_EXCEEDED', message: 'Maximum verification attempts exceeded. Please request a new code.' },
+            });
+            return;
+        }
+        const inputOtpHash = (0, tokens_1.hashToken)(otp.trim());
+        if (resetToken.otpHash !== inputOtpHash) {
+            const newAttempts = resetToken.attempts + 1;
+            await prisma_1.prisma.passwordResetToken.update({
+                where: { id: resetToken.id },
+                data: { attempts: newAttempts },
+            });
+            const remaining = Math.max(0, 5 - newAttempts);
+            res.status(400).json({
+                success: false,
+                error: {
+                    code: 'INVALID_OTP',
+                    message: `Incorrect verification code. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`,
+                },
+            });
+            return;
+        }
+        // Success! Generate single-use reset authorization token
+        const { raw: resetAuthToken, hash: resetAuthHash } = (0, tokens_1.generateToken)();
+        await prisma_1.prisma.passwordResetToken.update({
+            where: { id: resetToken.id },
+            data: {
+                resetAuthHash,
+            },
+        });
+        res.json({
+            success: true,
+            data: {
+                resetAuthToken,
+                message: 'Verification code confirmed. You may now reset your password.',
+            },
+        });
+    }
+    catch (error) {
+        console.error('Verify reset OTP error:', error);
+        res.status(500).json({
+            success: false,
+            error: { code: 'INTERNAL_ERROR', message: 'An internal error occurred' },
+        });
+    }
+});
+// ─── POST /api/auth/reset-password ───────────────────────────────────────────
+router.post('/reset-password', (0, validate_1.validate)(shared_import_1.resetPasswordSchema), async (req, res) => {
+    try {
+        const { token, password } = req.body;
+        const tokenHash = (0, tokens_1.hashToken)(token);
+        const resetToken = await prisma_1.prisma.passwordResetToken.findFirst({
+            where: {
+                OR: [
+                    { tokenHash },
+                    { resetAuthHash: tokenHash },
+                ],
+            },
+            include: { user: true },
+        });
+        if (!resetToken) {
+            res.status(400).json({
+                success: false,
+                error: { code: 'INVALID_TOKEN', message: 'Invalid or expired reset authorization' },
+            });
+            return;
+        }
+        if (resetToken.usedAt) {
+            res.status(400).json({
+                success: false,
+                error: { code: 'TOKEN_USED', message: 'This reset authorization has already been used' },
+            });
+            return;
+        }
+        if (resetToken.expiresAt < new Date()) {
+            res.status(400).json({
+                success: false,
+                error: { code: 'TOKEN_EXPIRED', message: 'This reset authorization has expired' },
             });
             return;
         }
@@ -407,7 +503,7 @@ router.post('/reset-password', (0, validate_1.validate)(shared_import_1.resetPas
         ]);
         res.json({
             success: true,
-            data: { message: 'Password reset successfully. Please sign in with your new password.' },
+            data: { message: 'Password reset successfully. Please sign in with your new credentials.' },
         });
     }
     catch (error) {

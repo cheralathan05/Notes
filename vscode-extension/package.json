@@ -1,0 +1,128 @@
+{
+  "name": "atlas-vscode",
+  "displayName": "Atlas Developer Workspace",
+  "description": "Connect your VS Code editor to Project Atlas AI Work Operating System",
+  "version": "1.0.0",
+  "publisher": "atlas",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["Productivity", "Other"],
+  "activationEvents": [
+    "onView:atlas.tasksView",
+    "onCommand:atlas.refreshTasks"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "atlas-sidebar",
+          "title": "Atlas",
+          "icon": "$(rocket)"
+        }
+      ]
+    },
+    "views": {
+      "atlas-sidebar": [
+        {
+          "id": "atlas.tasksView",
+          "name": "Assigned Tasks"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "atlas.login",
+        "title": "Atlas: Set Developer Token",
+        "category": "Atlas"
+      },
+      {
+        "command": "atlas.refreshTasks",
+        "title": "Atlas: Refresh Tasks",
+        "icon": "$(refresh)",
+        "category": "Atlas"
+      },
+      {
+        "command": "atlas.startTask",
+        "title": "Atlas: Start Work on Task",
+        "category": "Atlas"
+      },
+      {
+        "command": "atlas.runChecks",
+        "title": "Atlas: Run Validation Checks",
+        "category": "Atlas"
+      },
+      {
+        "command": "atlas.submitTask",
+        "title": "Atlas: Submit Task Evidence",
+        "category": "Atlas"
+      },
+      {
+        "command": "atlas.aiPlan",
+        "title": "Atlas: Generate AI Implementation Plan",
+        "category": "Atlas"
+      },
+      {
+        "command": "atlas.completionWizard",
+        "title": "Atlas: Launch Task Completion Wizard",
+        "category": "Atlas"
+      },
+      {
+        "command": "atlas.disconnect",
+        "title": "Atlas: Disconnect / Clear Credentials",
+        "category": "Atlas"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "atlas.refreshTasks",
+          "when": "view == atlas.tasksView",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "atlas.startTask",
+          "when": "view == atlas.tasksView && viewItem == taskItem",
+          "group": "inline"
+        },
+        {
+          "command": "atlas.runChecks",
+          "when": "view == atlas.tasksView && viewItem == taskItem",
+          "group": "inline"
+        },
+        {
+          "command": "atlas.submitTask",
+          "when": "view == atlas.tasksView && viewItem == taskItem",
+          "group": "inline"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Atlas Developer Workspace",
+      "properties": {
+        "atlas.apiUrl": {
+          "type": "string",
+          "default": "http://localhost:4000",
+          "description": "URL of the Atlas AI Work Operating System backend"
+        },
+        "atlas.developerToken": {
+          "type": "string",
+          "default": "",
+          "description": "Developer API token for authentication (atlas_dev_...)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.7.2"
+  }
+}

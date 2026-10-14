@@ -7,6 +7,7 @@ import {
   TaskStatusType,
   TaskPriorityType,
   ProjectItem,
+  TaskEvidenceItem,
 } from '@/lib/api';
 import {
   X,
@@ -27,7 +28,15 @@ import {
   ListTodo,
   MessageSquare,
   History,
+  ShieldCheck,
+  Terminal,
+  Code2,
+  Lock,
+  Unlock,
+  Check,
 } from 'lucide-react';
+
+import { TaskCompletionWizardModal } from './task-completion-wizard-modal';
 
 interface TaskDetailPanelProps {
   taskId: string | null;
@@ -44,7 +53,13 @@ export function TaskDetailPanel({
 }: TaskDetailPanelProps) {
   const [task, setTask] = useState<TaskItem | null>(null);
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'details' | 'subtasks' | 'comments'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'criteria' | 'evidence' | 'subtasks' | 'comments'>('details');
+
+  // Atlas Developer Workspace states
+  const [evidenceList, setEvidenceList] = useState<TaskEvidenceItem[]>([]);
+  const [newCritText, setNewCritText] = useState('');
+  const [isClaiming, setIsClaiming] = useState(false);
+  const [isWizardOpen, setIsWizardOpen] = useState(false);
 
   // Input states
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
@@ -61,6 +76,7 @@ export function TaskDetailPanel({
     }
 
     loadTask();
+    loadEvidence();
   }, [taskId]);
 
   const loadTask = async () => {
@@ -75,6 +91,92 @@ export function TaskDetailPanel({
       console.error('Failed to load task details:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadEvidence = async () => {
+    if (!taskId) return;
+    try {
+      const res = await api.getTaskEvidence(taskId);
+      if (res.success && res.data?.evidence) {
+        setEvidenceList(res.data.evidence);
+      }
+    } catch {
+      // Non-blocking
+    }
+  };
+
+  const handleClaim = async () => {
+    if (!task) return;
+    setIsClaiming(true);
+    try {
+      const res = await api.claimTask(task.id, 180);
+      if (res.success && res.data?.task) {
+        setTask(res.data.task);
+        onTaskUpdated();
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to claim task');
+    } finally {
+      setIsClaiming(false);
+    }
+  };
+
+  const handleRelease = async () => {
+    if (!task) return;
+    setIsClaiming(true);
+    try {
+      const res = await api.releaseTask(task.id);
+      if (res.success && res.data?.task) {
+        setTask(res.data.task);
+        onTaskUpdated();
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to release task claim');
+    } finally {
+      setIsClaiming(false);
+    }
+  };
+
+  const handleToggleCriterion = async (critId: string, currentStatus: boolean) => {
+    if (!task) return;
+    const currentList = (task.acceptanceCriteria || []) as Array<{ id: string; text: string; isCompleted: boolean }>;
+    const updated = currentList.map((c) => (c.id === critId ? { ...c, isCompleted: !currentStatus } : c));
+    setTask((prev) => (prev ? { ...prev, acceptanceCriteria: updated } : null));
+
+    try {
+      const res = await api.updateTaskCriteria(task.id, updated);
+      if (res.success && res.data?.task) {
+        setTask(res.data.task);
+        onTaskUpdated();
+      }
+    } catch {
+      loadTask();
+    }
+  };
+
+  const handleAddCriterion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!task || !newCritText.trim()) return;
+
+    const currentList = (task.acceptanceCriteria || []) as Array<{ id: string; text: string; isCompleted: boolean }>;
+    const newCrit = {
+      id: `crit_${Date.now().toString(36)}`,
+      text: newCritText.trim(),
+      isCompleted: false,
+    };
+    const updated = [...currentList, newCrit];
+    setNewCritText('');
+    setTask((prev) => (prev ? { ...prev, acceptanceCriteria: updated } : null));
+
+    try {
+      const res = await api.updateTaskCriteria(task.id, updated);
+      if (res.success && res.data?.task) {
+        setTask(res.data.task);
+        onTaskUpdated();
+      }
+    } catch {
+      loadTask();
     }
   };
 
@@ -378,6 +480,77 @@ export function TaskDetailPanel({
             </div>
           </div>
 
+          {/* Atlas Developer Workspace Status & Claim Lease */}
+          <div className="p-3.5 rounded-lg bg-[#141414] border border-[#262626] space-y-2.5 text-xs">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Code2 className="w-4 h-4 text-cyan-400" />
+                <span className="font-semibold text-white text-[11px] uppercase tracking-wider">Atlas Developer Workspace</span>
+              </div>
+              {task.isVerified && (
+                <span className="px-2 py-0.5 rounded bg-emerald-950/40 text-emerald-300 border border-emerald-800/50 text-[10px] font-mono font-semibold flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                  VERIFIED DONE
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between pt-1 border-t border-[#222222]">
+              <div className="flex items-center space-x-1.5 text-neutral-400">
+                {task.claimedById ? (
+                  <>
+                    <Lock className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Claimed by <strong className="text-white">{task.claimedBy?.displayName || task.claimedBy?.email || 'Developer'}</strong></span>
+                  </>
+                ) : (
+                  <>
+                    <Unlock className="w-3.5 h-3.5 text-neutral-500" />
+                    <span className="text-neutral-500">Unclaimed (No active lease)</span>
+                  </>
+                )}
+              </div>
+
+              <div>
+                {task.claimedById ? (
+                  <button
+                    onClick={handleRelease}
+                    disabled={isClaiming}
+                    className="px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-[11px] rounded font-medium transition-colors"
+                  >
+                    Release Lease
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleClaim}
+                    disabled={isClaiming}
+                    className="px-2.5 py-1 bg-neutral-200 hover:bg-white text-black text-[11px] rounded font-semibold transition-colors"
+                  >
+                    Claim Task (Lease)
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {task.branchName && (
+              <div className="text-[11px] text-neutral-400 font-mono flex items-center gap-1">
+                <GitBranch className="w-3 h-3 text-neutral-500" />
+                <span>Branch: <span className="text-white">{task.branchName}</span></span>
+              </div>
+            )}
+
+            {/* Launch Completion Wizard Trigger */}
+            <div className="pt-2 border-t border-[#222222] flex items-center justify-between">
+              <span className="text-[11px] text-neutral-400">Completion Engine:</span>
+              <button
+                onClick={() => setIsWizardOpen(true)}
+                className="px-2.5 py-1 bg-white hover:bg-neutral-200 text-black text-[11px] font-semibold rounded flex items-center gap-1.5 transition-colors shadow-sm"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-black" />
+                <span>Launch Completion Wizard</span>
+              </button>
+            </div>
+          </div>
+
           {/* Linked Documents (Documents & Notes Integration) */}
           {task.document && (
             <div className="p-3 rounded-lg bg-[#141414] border border-[#222222] flex items-center justify-between text-xs">
@@ -396,10 +569,10 @@ export function TaskDetailPanel({
           )}
 
           {/* Tab Navigation */}
-          <div className="flex border-b border-[#222222] text-xs">
+          <div className="flex border-b border-[#222222] text-xs overflow-x-auto">
             <button
               onClick={() => setActiveTab('details')}
-              className={`pb-2.5 px-3 font-medium transition-colors border-b-2 flex items-center gap-1.5 ${
+              className={`pb-2.5 px-3 font-medium transition-colors border-b-2 flex items-center gap-1.5 whitespace-nowrap ${
                 activeTab === 'details'
                   ? 'border-white text-white'
                   : 'border-transparent text-neutral-500 hover:text-neutral-300'
@@ -409,8 +582,30 @@ export function TaskDetailPanel({
               Checklist ({task.checklistProgress?.done || 0}/{task.checklistProgress?.total || 0})
             </button>
             <button
+              onClick={() => setActiveTab('criteria')}
+              className={`pb-2.5 px-3 font-medium transition-colors border-b-2 flex items-center gap-1.5 whitespace-nowrap ${
+                activeTab === 'criteria'
+                  ? 'border-white text-white'
+                  : 'border-transparent text-neutral-500 hover:text-neutral-300'
+              }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              Criteria ({((task.acceptanceCriteria as any[]) || []).filter((c: any) => c.isCompleted).length}/{((task.acceptanceCriteria as any[]) || []).length})
+            </button>
+            <button
+              onClick={() => setActiveTab('evidence')}
+              className={`pb-2.5 px-3 font-medium transition-colors border-b-2 flex items-center gap-1.5 whitespace-nowrap ${
+                activeTab === 'evidence'
+                  ? 'border-white text-white'
+                  : 'border-transparent text-neutral-500 hover:text-neutral-300'
+              }`}
+            >
+              <Terminal className="w-3.5 h-3.5" />
+              Evidence ({evidenceList.length})
+            </button>
+            <button
               onClick={() => setActiveTab('subtasks')}
-              className={`pb-2.5 px-3 font-medium transition-colors border-b-2 flex items-center gap-1.5 ${
+              className={`pb-2.5 px-3 font-medium transition-colors border-b-2 flex items-center gap-1.5 whitespace-nowrap ${
                 activeTab === 'subtasks'
                   ? 'border-white text-white'
                   : 'border-transparent text-neutral-500 hover:text-neutral-300'
@@ -421,7 +616,7 @@ export function TaskDetailPanel({
             </button>
             <button
               onClick={() => setActiveTab('comments')}
-              className={`pb-2.5 px-3 font-medium transition-colors border-b-2 flex items-center gap-1.5 ${
+              className={`pb-2.5 px-3 font-medium transition-colors border-b-2 flex items-center gap-1.5 whitespace-nowrap ${
                 activeTab === 'comments'
                   ? 'border-white text-white'
                   : 'border-transparent text-neutral-500 hover:text-neutral-300'
@@ -545,6 +740,164 @@ export function TaskDetailPanel({
             </div>
           )}
 
+          {/* TAB: Acceptance Criteria */}
+          {activeTab === 'criteria' && (
+            <div className="space-y-4">
+              <div>
+                <p className="text-[11px] text-neutral-400 leading-relaxed mb-3">
+                  Acceptance criteria define the mandatory conditions for this task. The Atlas CLI and VS Code extension check these before marking the task <span className="font-mono text-emerald-400">DONE</span>.
+                </p>
+
+                <div className="space-y-2">
+                  {((task.acceptanceCriteria as any[]) || []).map((crit: any) => (
+                    <div
+                      key={crit.id}
+                      onClick={() => handleToggleCriterion(crit.id, crit.isCompleted)}
+                      className={`flex items-start space-x-2.5 p-2.5 rounded border cursor-pointer transition-colors ${
+                        crit.isCompleted
+                          ? 'bg-emerald-950/20 border-emerald-900/40'
+                          : 'bg-[#141414] border-[#222222] hover:bg-[#1a1a1a]'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={crit.isCompleted}
+                        onChange={() => {}}
+                        className="mt-0.5 rounded border-[#333333] bg-[#1a1a1a] text-emerald-500 focus:ring-0"
+                      />
+                      <div className="flex-1">
+                        <span
+                          className={`text-xs ${
+                            crit.isCompleted ? 'line-through text-neutral-400 font-normal' : 'text-neutral-100 font-medium'
+                          }`}
+                        >
+                          {crit.text}
+                        </span>
+                      </div>
+                      {crit.isCompleted && (
+                        <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-emerald-900/40 text-emerald-300 font-semibold">
+                          Satisfied
+                        </span>
+                      )}
+                    </div>
+                  ))}
+
+                  {(!task.acceptanceCriteria || (task.acceptanceCriteria as any[]).length === 0) && (
+                    <div className="p-4 rounded border border-dashed border-[#2b2b2b] text-center text-xs text-neutral-500">
+                      No acceptance criteria defined yet. Add the requirements developers must satisfy.
+                    </div>
+                  )}
+                </div>
+
+                <form onSubmit={handleAddCriterion} className="mt-3 flex gap-1.5">
+                  <input
+                    type="text"
+                    value={newCritText}
+                    onChange={(e) => setNewCritText(e.target.value)}
+                    placeholder="e.g. Pass all unit tests and update auth docs..."
+                    className="flex-1 bg-[#141414] border border-[#242424] text-xs text-white rounded px-2.5 py-1.5 focus:outline-none focus:border-neutral-500"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!newCritText.trim()}
+                    className="p-1.5 px-3 bg-neutral-200 hover:bg-white text-black text-xs rounded font-semibold disabled:opacity-40 transition-colors"
+                  >
+                    Add Criterion
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: Execution Evidence */}
+          {activeTab === 'evidence' && (
+            <div className="space-y-4">
+              <div>
+                <p className="text-[11px] text-neutral-400 leading-relaxed mb-3">
+                  Evidence submitted by developers via the Atlas CLI (<span className="font-mono text-cyan-300">atlas task submit</span>) or VS Code extension. Results are verified server-side.
+                </p>
+
+                <div className="space-y-2.5 max-h-[380px] overflow-y-auto">
+                  {evidenceList.map((ev) => (
+                    <div key={ev.id} className="p-3 rounded-lg bg-[#141414] border border-[#242424] text-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
+                              ev.status === 'PASSED'
+                                ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-800/60'
+                                : 'bg-rose-950/60 text-rose-300 border border-rose-800/60'
+                            }`}
+                          >
+                            {ev.status}
+                          </span>
+                          <span className="font-mono text-white text-[11px]">{ev.command}</span>
+                        </div>
+                        <span className="text-[10px] text-neutral-500 font-mono">
+                          exit code: {ev.exitCode}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-[11px] text-neutral-400 font-mono bg-[#111111] p-2 rounded border border-[#1e1e1e]">
+                        {ev.commitHash && (
+                          <div>
+                            Commit: <span className="text-white">{ev.commitHash.slice(0, 7)}</span>
+                          </div>
+                        )}
+                        {ev.branch && (
+                          <div>
+                            Branch: <span className="text-white">{ev.branch}</span>
+                          </div>
+                        )}
+                        {ev.changedFiles && (
+                          <div className="col-span-2">
+                            Files changed: <span className="text-white">{ev.changedFiles.length} file(s)</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {ev.stdoutSnippet && (
+                        <div className="mt-1">
+                          <span className="text-[10px] uppercase font-bold text-neutral-500 block mb-1">Standard Output</span>
+                          <pre className="text-[10px] font-mono p-2 rounded bg-black border border-[#222222] text-neutral-300 overflow-x-auto whitespace-pre-wrap max-h-24">
+                            {ev.stdoutSnippet}
+                          </pre>
+                        </div>
+                      )}
+
+                      {ev.stderrSnippet && (
+                        <div className="mt-1">
+                          <span className="text-[10px] uppercase font-bold text-rose-400 block mb-1">Error Output</span>
+                          <pre className="text-[10px] font-mono p-2 rounded bg-rose-950/20 border border-rose-900/40 text-rose-300 overflow-x-auto whitespace-pre-wrap max-h-24">
+                            {ev.stderrSnippet}
+                          </pre>
+                        </div>
+                      )}
+
+                      <div className="text-[10px] text-neutral-500 text-right">
+                        Submitted {new Date(ev.createdAt || ev.executedAt).toLocaleString()}
+                      </div>
+                    </div>
+                  ))}
+
+                  {evidenceList.length === 0 && (
+                    <div className="p-4 rounded border border-dashed border-[#2b2b2b] text-center space-y-2">
+                      <Terminal className="w-5 h-5 text-neutral-500 mx-auto" />
+                      <p className="text-xs text-neutral-400 font-medium">No verified evidence submitted yet.</p>
+                      <p className="text-[11px] text-neutral-500">
+                        Run tests and submit evidence from your terminal using:
+                      </p>
+                      <pre className="text-[10px] font-mono p-2 rounded bg-black border border-[#222222] text-cyan-300 text-left inline-block">
+                        atlas checks run TASK-{task.id.slice(0, 8)}<br/>
+                        atlas task submit TASK-{task.id.slice(0, 8)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* TAB 2: Subtasks */}
           {activeTab === 'subtasks' && (
             <div className="space-y-4">
@@ -638,6 +991,20 @@ export function TaskDetailPanel({
           Task not found.
         </div>
       )}
+
+      {isWizardOpen && task && (
+        <TaskCompletionWizardModal
+          task={task}
+          isOpen={isWizardOpen}
+          onClose={() => setIsWizardOpen(false)}
+          onCompleted={() => {
+            loadTask();
+            loadEvidence();
+            onTaskUpdated();
+          }}
+        />
+      )}
     </div>
   );
 }
+

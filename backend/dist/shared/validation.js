@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onboardingSchema = exports.changePasswordSchema = exports.updateProfileSchema = exports.verifyEmailSchema = exports.resetPasswordSchema = exports.forgotPasswordSchema = exports.loginSchema = exports.registerSchema = exports.displayNameSchema = exports.emailSchema = exports.passwordSchema = void 0;
+exports.onboardingSchema = exports.changePasswordSchema = exports.updateProfileSchema = exports.verifyEmailSchema = exports.resetPasswordSchema = exports.verifyResetOtpSchema = exports.forgotPasswordSchema = exports.loginSchema = exports.registerSchema = exports.displayNameSchema = exports.emailSchema = exports.passwordSchema = void 0;
 exports.getPasswordStrength = getPasswordStrength;
 const zod_1 = require("zod");
 // ─── Password validation ────────────────────────────────────────────────────
@@ -44,6 +44,11 @@ exports.loginSchema = zod_1.z.object({
 // ─── Forgot password ────────────────────────────────────────────────────────
 exports.forgotPasswordSchema = zod_1.z.object({
     email: exports.emailSchema,
+});
+// ─── Verify reset OTP ────────────────────────────────────────────────────────
+exports.verifyResetOtpSchema = zod_1.z.object({
+    email: exports.emailSchema,
+    otp: zod_1.z.string().length(6, 'Verification code must be exactly 6 digits').regex(/^\d{6}$/, 'Verification code must contain only digits'),
 });
 // ─── Reset password ─────────────────────────────────────────────────────────
 exports.resetPasswordSchema = zod_1.z.object({

@@ -17,6 +17,15 @@ import collaborationRoutes from './routes/collaboration';
 import exportImportRoutes from './routes/export-import';
 import taskRoutes from './routes/tasks';
 import projectRoutes from './routes/projects';
+import notificationsRoutes from './routes/notifications';
+import focusRoutes from './routes/focus';
+import goalsRoutes from './routes/goals';
+import automationsRoutes from './routes/automations';
+import analyticsRoutes from './routes/analytics';
+import developerRoutes from './routes/developer';
+import repositoriesRoutes from './routes/repositories';
+import taskEvidenceRoutes from './routes/task-evidence';
+import aiDeveloperRoutes from './routes/ai-developer';
 
 // Validate environment before starting
 validateEnv();
@@ -29,11 +38,22 @@ app.use(helmet({
   contentSecurityPolicy: false, // CSP handled by frontend
 }));
 
+const allowedOrigins = (config.corsOrigin || 'http://localhost:3000')
+  .split(',')
+  .map((origin) => origin.trim().replace(/\/+$/, ''));
+
 app.use(cors({
-  origin: config.corsOrigin,
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    const cleanOrigin = origin.replace(/\/+$/, '');
+    if (allowedOrigins.includes(cleanOrigin) || allowedOrigins.includes('*') || !config.isProduction) {
+      return callback(null, true);
+    }
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-atlas-token'],
 }));
 
 app.use(cookieParser());
@@ -88,6 +108,15 @@ app.use('/api/search', generalLimiter, searchRoutes);
 app.use('/api/ai', generalLimiter, aiRoutes);
 app.use('/api/tasks', generalLimiter, taskRoutes);
 app.use('/api/projects', generalLimiter, projectRoutes);
+app.use('/api/notifications', generalLimiter, notificationsRoutes);
+app.use('/api/focus', generalLimiter, focusRoutes);
+app.use('/api/goals', generalLimiter, goalsRoutes);
+app.use('/api/automations', generalLimiter, automationsRoutes);
+app.use('/api/analytics', generalLimiter, analyticsRoutes);
+app.use('/api/developer', generalLimiter, developerRoutes);
+app.use('/api/repositories', generalLimiter, repositoriesRoutes);
+app.use('/api/tasks', generalLimiter, taskEvidenceRoutes);
+app.use('/api/ai', generalLimiter, aiDeveloperRoutes);
 app.use('/api', generalLimiter, collaborationRoutes); // Public share endpoint: /api/public/documents/:token
 
 

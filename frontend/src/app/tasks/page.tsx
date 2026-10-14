@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { AppShell } from '@/components/app-shell';
 import {
   api,
+  API_BASE_URL,
   TaskItem,
   ProjectItem,
   TaskPriorityType,
@@ -11,6 +12,8 @@ import {
 } from '@/lib/api';
 import { TaskKanban } from '@/components/tasks/task-kanban';
 import { TaskList } from '@/components/tasks/task-list';
+import { TaskCalendar } from '@/components/tasks/task-calendar';
+import { TaskTimeline } from '@/components/tasks/task-timeline';
 import { MyDayView } from '@/components/tasks/my-day-view';
 import { ProjectManager } from '@/components/tasks/project-manager';
 import { TaskDetailPanel } from '@/components/tasks/task-detail-panel';
@@ -18,6 +21,8 @@ import { TerminalCommandCenter } from '@/components/tasks/terminal-command-cente
 import {
   LayoutGrid,
   List,
+  Calendar as CalendarIcon,
+  GanttChart,
   Sun,
   Folder,
   Plus,
@@ -29,7 +34,7 @@ import {
 } from 'lucide-react';
 
 export default function TasksWorkspacePage() {
-  const [view, setView] = useState<'board' | 'list' | 'my-day' | 'projects'>('board');
+  const [view, setView] = useState<'board' | 'list' | 'calendar' | 'timeline' | 'my-day' | 'projects'>('board');
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -84,7 +89,7 @@ export default function TasksWorkspacePage() {
 
   // Real-Time SSE Stream Integration
   useEffect(() => {
-    const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+    const apiBase = API_BASE_URL;
     const eventSource = new EventSource(`${apiBase}/api/tasks/events`, {
       withCredentials: true,
     });
@@ -209,6 +214,30 @@ export default function TasksWorkspacePage() {
               </button>
 
               <button
+                onClick={() => setView('calendar')}
+                className={`px-3 py-1.5 rounded-md font-medium flex items-center gap-1.5 transition-colors ${
+                  view === 'calendar'
+                    ? 'bg-neutral-200 text-black shadow-sm font-semibold'
+                    : 'text-neutral-400 hover:text-white'
+                }`}
+              >
+                <CalendarIcon className="w-3.5 h-3.5" />
+                <span>Calendar</span>
+              </button>
+
+              <button
+                onClick={() => setView('timeline')}
+                className={`px-3 py-1.5 rounded-md font-medium flex items-center gap-1.5 transition-colors ${
+                  view === 'timeline'
+                    ? 'bg-neutral-200 text-black shadow-sm font-semibold'
+                    : 'text-neutral-400 hover:text-white'
+                }`}
+              >
+                <GanttChart className="w-3.5 h-3.5" />
+                <span>Timeline</span>
+              </button>
+
+              <button
                 onClick={() => setView('my-day')}
                 className={`px-3 py-1.5 rounded-md font-medium flex items-center gap-1.5 transition-colors ${
                   view === 'my-day'
@@ -308,6 +337,20 @@ export default function TasksWorkspacePage() {
               projects={projects}
               onSelectTask={(id) => setSelectedTaskId(id)}
               onRefresh={loadData}
+            />
+          ) : view === 'calendar' ? (
+            <TaskCalendar
+              tasks={tasks}
+              onSelectTask={(id) => setSelectedTaskId(id)}
+              onQuickCreateDate={(dateStr) => {
+                setNewDueDate(dateStr);
+                setIsCreateModalOpen(true);
+              }}
+            />
+          ) : view === 'timeline' ? (
+            <TaskTimeline
+              tasks={tasks}
+              onSelectTask={(id) => setSelectedTaskId(id)}
             />
           ) : view === 'my-day' ? (
             <MyDayView

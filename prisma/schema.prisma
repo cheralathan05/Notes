@@ -47,6 +47,16 @@ model User {
   projectMemberships      ProjectMember[]
   taskComments            TaskComment[]
   taskActivities          TaskActivity[]
+  receivedNotifications   Notification[]            @relation("ReceivedNotifications")
+  actedNotifications      Notification[]            @relation("ActedNotifications")
+  focusSessions           FocusSession[]
+  timeEntries             TimeEntry[]
+  createdGoals            Goal[]                    @relation("CreatedGoals")
+  goalProgressEntries     GoalProgress[]
+  createdAutomations      Automation[]              @relation("CreatedAutomations")
+  developerTokens         DeveloperToken[]
+  claimedTasks            Task[]                    @relation("ClaimedTasks")
+  submittedEvidence       TaskEvidence[]
 
   @@map("users")
 }
@@ -131,6 +141,13 @@ model Workspace {
   tasks       Task[]
   projects    Project[]
   taskLabels  TaskLabel[]
+  notifications Notification[]
+  focusSessions FocusSession[]
+  timeEntries   TimeEntry[]
+  goals         Goal[]
+  automations   Automation[]
+  repositories  Repository[]
+  developerTokens DeveloperToken[]
 
   @@map("workspaces")
 }
@@ -571,6 +588,9 @@ model Project {
   tasks       Task[]
   milestones  Milestone[]
   documents   Document[]
+  timeEntries TimeEntry[]
+  goals       Goal[]
+  repositories Repository[]
 
   @@index([workspaceId])
   @@index([creatorId])
@@ -650,6 +670,19 @@ model Task {
   blockedBy      TaskDependency[] @relation("BlockedTaskRelation")
   blocking       TaskDependency[] @relation("BlockingTaskRelation")
   recurrence     TaskRecurrence?
+  focusSessions  FocusSession[]
+  timeEntries    TimeEntry[]
+  repositoryId   String?          @map("repository_id")
+  repository     Repository?      @relation(fields: [repositoryId], references: [id], onDelete: SetNull)
+  branchName     String?          @map("branch_name")
+  acceptanceCriteria Json?        @map("acceptance_criteria")
+  claimedById    String?          @map("claimed_by_id")
+  claimedBy      User?            @relation("ClaimedTasks", fields: [claimedById], references: [id], onDelete: SetNull)
+  claimedAt      DateTime?        @map("claimed_at")
+  leaseExpiresAt DateTime?        @map("lease_expires_at")
+  isVerified     Boolean          @default(false) @map("is_verified")
+  verifiedAt     DateTime?        @map("verified_at")
+  evidence       TaskEvidence[]
 
   @@index([workspaceId])
   @@index([creatorId])
@@ -766,4 +799,288 @@ model TaskRecurrence {
 
   @@map("task_recurrences")
 }
+
+// ─── Notifications & Activity Hub ──────────────────────────────────────────
+
+enum NotificationType {
+  TASK_ASSIGNED
+  TASK_STATUS_CHANGED
+  DEADLINE_APPROACHING
+  DEPENDENCY_UNBLOCKED
+  MENTION
+  SYSTEM
+  AUTOMATION_ALERT
+}
+
+model Notification {
+  id          String           @id @default(cuid())
+  workspaceId String           @map("workspace_id")
+  recipientId String           @map("recipient_id")
+  actorId     String?          @map("actor_id")
+  type        NotificationType @default(SYSTEM)
+  title       String
+  message     String
+  linkUrl     String?          @map("link_url")
+  isRead      Boolean          @default(false) @map("is_read")
+  readAt      DateTime?        @map("read_at")
+  metadata    Json?
+  createdAt   DateTime         @default(now()) @map("created_at")
+
+  workspace   Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  recipient   User             @relation("ReceivedNotifications", fields: [recipientId], references: [id], onDelete: Cascade)
+  actor       User?            @relation("ActedNotifications", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([recipientId])
+  @@index([isRead])
+  @@map("notifications")
+}
+
+// ─── Time Tracking & Focus Sessions ────────────────────────────────────────
+
+enum FocusSessionStatus {
+  RUNNING
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+model FocusSession {
+  id            String             @id @default(cuid())
+  workspaceId   String             @map("workspace_id")
+  userId        String             @map("user_id")
+  taskId        String?            @map("task_id")
+  title         String
+  targetMinutes Int                @default(25) @map("target_minutes")
+  actualSeconds Int                @default(0) @map("actual_seconds")
+  status        FocusSessionStatus @default(RUNNING)
+  startedAt     DateTime           @default(now()) @map("started_at")
+  endedAt       DateTime?          @map("ended_at")
+  notes         String?            @db.Text
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+
+  workspace     Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task          Task?              @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([taskId])
+  @@map("focus_sessions")
+}
+
+model TimeEntry {
+  id              String    @id @default(cuid())
+  workspaceId     String    @map("workspace_id")
+  userId          String    @map("user_id")
+  taskId          String?   @map("task_id")
+  projectId       String?   @map("project_id")
+  durationSeconds Int       @map("duration_seconds")
+  startedAt       DateTime  @map("started_at")
+  endedAt         DateTime  @map("ended_at")
+  description     String?
+  isManual        Boolean   @default(false) @map("is_manual")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task            Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  project         Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([taskId])
+  @@index([projectId])
+  @@map("time_entries")
+}
+
+// ─── Goals & Progress Tracking ─────────────────────────────────────────────
+
+enum GoalStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  ACHIEVED
+  AT_RISK
+  CANCELLED
+}
+
+model Goal {
+  id           String         @id @default(cuid())
+  workspaceId  String         @map("workspace_id")
+  creatorId    String         @map("creator_id")
+  title        String
+  description  String?        @db.Text
+  category     String         @default("Strategic")
+  targetValue  Float          @default(100) @map("target_value")
+  currentValue Float          @default(0) @map("current_value")
+  unit         String         @default("%")
+  status       GoalStatus     @default(NOT_STARTED)
+  startDate    DateTime?      @map("start_date")
+  targetDate   DateTime?      @map("target_date")
+  projectId    String?        @map("project_id")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creator      User           @relation("CreatedGoals", fields: [creatorId], references: [id], onDelete: Cascade)
+  project      Project?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  checkIns     GoalProgress[]
+
+  @@index([workspaceId])
+  @@index([creatorId])
+  @@index([projectId])
+  @@map("goals")
+}
+
+model GoalProgress {
+  id            String   @id @default(cuid())
+  goalId        String   @map("goal_id")
+  userId        String   @map("user_id")
+  previousValue Float    @map("previous_value")
+  newValue      Float    @map("new_value")
+  note          String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  goal          Goal     @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([goalId])
+  @@index([userId])
+  @@map("goal_progress_entries")
+}
+
+// ─── Automations & Execution Engine ────────────────────────────────────────
+
+enum AutomationTriggerType {
+  TASK_CREATED
+  TASK_STATUS_CHANGED
+  TASK_OVERDUE
+  MILESTONE_COMPLETED
+  NOTE_PUBLISHED
+  SCHEDULE_DAILY
+}
+
+enum AutomationExecutionStatus {
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
+model Automation {
+  id             String                @id @default(cuid())
+  workspaceId    String                @map("workspace_id")
+  creatorId      String                @map("creator_id")
+  name           String
+  description    String?
+  triggerType    AutomationTriggerType @default(TASK_CREATED) @map("trigger_type")
+  triggerConfig  Json?                 @map("trigger_config")
+  conditions     Json                  @default("[]")
+  actions        Json                  @default("[]")
+  isEnabled      Boolean               @default(true) @map("is_enabled")
+  executionCount Int                   @default(0) @map("execution_count")
+  lastRunAt      DateTime?             @map("last_run_at")
+  createdAt      DateTime              @default(now()) @map("created_at")
+  updatedAt      DateTime              @updatedAt @map("updated_at")
+
+  workspace      Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creator        User                  @relation("CreatedAutomations", fields: [creatorId], references: [id], onDelete: Cascade)
+  executions     AutomationExecution[]
+
+  @@index([workspaceId])
+  @@index([creatorId])
+  @@index([triggerType])
+  @@map("automations")
+}
+
+model AutomationExecution {
+  id            String                    @id @default(cuid())
+  automationId  String                    @map("automation_id")
+  triggerEvent  String                    @map("trigger_event")
+  status        AutomationExecutionStatus @default(SUCCESS)
+  actionResults Json?                     @map("action_results")
+  errorMessage  String?                   @map("error_message")
+  durationMs    Int                       @default(0) @map("duration_ms")
+  executedAt    DateTime                  @default(now()) @map("executed_at")
+
+  automation    Automation                @relation(fields: [automationId], references: [id], onDelete: Cascade)
+
+  @@index([automationId])
+  @@index([executedAt])
+  @@map("automation_executions")
+}
+
+// ─── Project Atlas — Developer Workspace Models ─────────────────────────────
+
+model DeveloperToken {
+  id          String    @id @default(cuid())
+  userId      String    @map("user_id")
+  workspaceId String    @map("workspace_id")
+  name        String
+  tokenHash   String    @unique @map("token_hash")
+  lastUsedAt  DateTime? @map("last_used_at")
+  expiresAt   DateTime? @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([workspaceId])
+  @@map("developer_tokens")
+}
+
+model Repository {
+  id            String    @id @default(cuid())
+  workspaceId   String    @map("workspace_id")
+  projectId     String?   @map("project_id")
+  name          String
+  slug          String
+  gitUrl        String?   @map("git_url")
+  defaultBranch String    @default("main") @map("default_branch")
+  localPath     String?   @map("local_path")
+  description   String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project       Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  tasks         Task[]
+
+  @@unique([workspaceId, slug])
+  @@index([workspaceId])
+  @@index([projectId])
+  @@map("repositories")
+}
+
+enum EvidenceStatus {
+  PASSED
+  FAILED
+}
+
+model TaskEvidence {
+  id             String         @id @default(cuid())
+  taskId         String         @map("task_id")
+  userId         String         @map("user_id")
+  command        String
+  exitCode       Int            @map("exit_code")
+  stdoutSnippet  String?        @map("stdout_snippet") @db.Text
+  stderrSnippet  String?        @map("stderr_snippet") @db.Text
+  commitHash     String?        @map("commit_hash")
+  branch         String?
+  changedFiles   Json?          @map("changed_files")
+  pullRequestUrl String?        @map("pull_request_url")
+  status         EvidenceStatus @default(PASSED)
+  executedAt     DateTime       @default(now()) @map("executed_at")
+
+  task           Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([userId])
+  @@map("task_evidence")
+}
+
+
 

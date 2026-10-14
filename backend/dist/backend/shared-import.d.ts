@@ -1,2 +1,2 @@
-export { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema, verifyEmailSchema, updateProfileSchema, changePasswordSchema, onboardingSchema, emailSchema, passwordSchema, displayNameSchema, } from '../shared/validation';
+export { registerSchema, loginSchema, forgotPasswordSchema, verifyResetOtpSchema, resetPasswordSchema, verifyEmailSchema, updateProfileSchema, changePasswordSchema, onboardingSchema, emailSchema, passwordSchema, displayNameSchema, } from '../shared/validation';
 //# sourceMappingURL=shared-import.d.ts.map

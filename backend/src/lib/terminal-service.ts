@@ -1,6 +1,9 @@
 import { prisma } from './prisma';
 import { tasksService } from './tasks-service';
 import { projectsService } from './projects-service';
+import { focusService } from './focus-service';
+import { goalsService } from './goals-service';
+import { notificationsService } from './notifications-service';
 import { TaskStatus, TaskPriority } from '@prisma/client';
 
 export interface TerminalExecutionResult {
@@ -208,15 +211,20 @@ export class TerminalService {
         success: true,
         command: trimmed,
         output: [
-          'KRONOS WORKSPACE CLI - COMMAND CENTER',
-          '======================================',
+          'KRONOS AI WORK OPERATING SYSTEM - COMMAND CENTER',
+          '=================================================',
           'Available Command Groups:',
           '  task <subcommand>     Manage tasks, assignees, subtasks, dependencies',
           '  project <subcommand>  Manage projects, milestones, progress',
+          '  note <subcommand>     List, create, or inspect documents & notes',
+          '  search "<query>"      Unified workspace search across notes and tasks',
+          '  time <subcommand>     Manage focus sessions & time tracking (start|pause|complete|totals)',
+          '  goal <subcommand>     List goals, OKR progress, and check-ins',
+          '  notify <subcommand>   List notifications or clear all (list|clear)',
           '  clear                 Clear terminal window output',
           '  help [task|project]   Display detailed help for command group',
           '',
-          'Aliases: tc <ID> (task complete) | tl (task list) | pl (project list)',
+          'Aliases: tc <ID> (task complete) | tl (task list) | pl (project list) | nl (note list)',
           'Type "help task" or "help project" for detailed syntax.',
         ].join('\n'),
         timestamp,
@@ -910,6 +918,302 @@ export class TerminalService {
           timestamp,
         };
       }
+    }
+
+    // ─── NOTE COMMANDS ─────────────────────────────────────────────────────────
+    if (rootCommand === 'note' || rootCommand === 'doc' || rootCommand === 'nl') {
+      const noteSub = rootCommand === 'nl' ? 'list' : subCommand;
+
+      // note list
+      if (noteSub === 'list' || !noteSub) {
+        const documents = await prisma.document.findMany({
+          where: { workspaceId, isDeleted: false, isArchived: false },
+          orderBy: { updatedAt: 'desc' },
+          take: 15,
+          select: { id: true, title: true, status: true, updatedAt: true, icon: true },
+        });
+
+        if (documents.length === 0) {
+          return {
+            success: true,
+            command: trimmed,
+            output: 'No documents or notes found in workspace.',
+            data: { documents: [] },
+            timestamp,
+          };
+        }
+
+        const lines = documents.map((d) => `  ${d.icon || '📄'} ${d.id.slice(0, 8)} | [${d.status.padEnd(9)}] | ${d.title}`);
+
+        return {
+          success: true,
+          command: trimmed,
+          output: [`Workspace Documents & Notes (${documents.length}):`, ...lines].join('\n'),
+          data: { documents },
+          timestamp,
+        };
+      }
+
+      // note create "<title>"
+      if (noteSub === 'create') {
+        const title = args.slice(2).join(' ').trim() || (flags.title ? String(flags.title) : 'Untitled Note');
+        const doc = await prisma.document.create({
+          data: {
+            workspaceId,
+            creatorId: userId,
+            title,
+            status: 'DRAFT',
+            content: { type: 'doc', content: [{ type: 'paragraph' }] },
+          },
+        });
+
+        return {
+          success: true,
+          command: trimmed,
+          output: `Created note "${doc.title}" (ID: ${doc.id.slice(0, 8)}).`,
+          data: { document: doc },
+          timestamp,
+        };
+      }
+
+      // note show <id>
+      if (noteSub === 'show') {
+        const id = args[2];
+        const doc = await prisma.document.findFirst({
+          where: {
+            workspaceId,
+            OR: [{ id }, { id: { startsWith: id } }, { title: { contains: id, mode: 'insensitive' } }],
+          },
+        });
+
+        if (!doc) {
+          return {
+            success: false,
+            command: trimmed,
+            output: `Note "${id}" not found.`,
+            timestamp,
+          };
+        }
+
+        return {
+          success: true,
+          command: trimmed,
+          output: [
+            `Document: ${doc.title} (${doc.id.slice(0, 8)})`,
+            `Status:   ${doc.status} | Version: v${doc.version}`,
+            `Created:  ${doc.createdAt.toISOString()}`,
+            `Preview:  ${doc.plainText ? doc.plainText.slice(0, 150) + '...' : '(No text preview)'}`,
+          ].join('\n'),
+          data: { document: doc },
+          timestamp,
+        };
+      }
+    }
+
+    // ─── UNIFIED SEARCH COMMAND ────────────────────────────────────────────────
+    if (rootCommand === 'search') {
+      const query = args.slice(1).join(' ').trim();
+      if (!query) {
+        return {
+          success: false,
+          command: trimmed,
+          output: 'Usage: search "<query>"',
+          timestamp,
+        };
+      }
+
+      const [tasks, documents] = await Promise.all([
+        tasksService.listTasks(workspaceId, { search: query }),
+        prisma.document.findMany({
+          where: {
+            workspaceId,
+            isDeleted: false,
+            OR: [
+              { title: { contains: query, mode: 'insensitive' } },
+              { plainText: { contains: query, mode: 'insensitive' } },
+            ],
+          },
+          take: 5,
+          select: { id: true, title: true, status: true },
+        }),
+      ]);
+
+      const outputLines: string[] = [`Search results for "${query}":`];
+      if (tasks.length > 0) {
+        outputLines.push(`Tasks (${tasks.length}):`);
+        tasks.slice(0, 5).forEach((t: any) => {
+          outputLines.push(`  ${t.status === 'DONE' ? '✓' : '○'} ${t.id.slice(0, 8)} | ${t.title}`);
+        });
+      }
+      if (documents.length > 0) {
+        outputLines.push(`Notes & Documents (${documents.length}):`);
+        documents.forEach((d) => {
+          outputLines.push(`  📄 ${d.id.slice(0, 8)} | ${d.title} (${d.status})`);
+        });
+      }
+      if (tasks.length === 0 && documents.length === 0) {
+        outputLines.push(`  No matching tasks or notes found.`);
+      }
+
+      return {
+        success: true,
+        command: trimmed,
+        output: outputLines.join('\n'),
+        data: { tasks, documents },
+        timestamp,
+      };
+    }
+
+    // ─── TIME & FOCUS COMMANDS ─────────────────────────────────────────────────
+    if (rootCommand === 'time') {
+      const timeSub = subCommand || 'totals';
+
+      // time totals / time status
+      if (timeSub === 'totals' || timeSub === 'status') {
+        const [active, totals] = await Promise.all([
+          focusService.getActiveSession(workspaceId, userId),
+          focusService.getDailyWeeklyTotals(workspaceId, userId),
+        ]);
+
+        const lines: string[] = ['Focus & Time Telemetry:'];
+        if (active) {
+          lines.push(`  ACTIVE SESSION: "${active.title}" [${active.status}]`);
+          lines.push(`  Target: ${active.targetMinutes}m | Elapsed: ${Math.round(active.actualSeconds / 60)}m`);
+        } else {
+          lines.push('  No active focus session.');
+        }
+        lines.push(`  Today Logged: ${totals.todayHours}h (${totals.todayMinutes}m)`);
+        lines.push(`  Week Logged:  ${totals.weekHours}h (${totals.weekMinutes}m)`);
+
+        return {
+          success: true,
+          command: trimmed,
+          output: lines.join('\n'),
+          data: { active, totals },
+          timestamp,
+        };
+      }
+
+      // time start "<title>"
+      if (timeSub === 'start') {
+        const title = args.slice(2).join(' ') || 'Deep Focus Sprint';
+        const targetMinutes = flags.target ? parseInt(String(flags.target), 10) : 25;
+        const session = await focusService.startFocusSession(workspaceId, userId, {
+          title,
+          targetMinutes,
+        });
+
+        return {
+          success: true,
+          command: trimmed,
+          output: `Focus session started: "${session.title}" (${session.targetMinutes} minutes target).`,
+          data: { session },
+          timestamp,
+        };
+      }
+
+      // time pause
+      if (timeSub === 'pause') {
+        const active = await focusService.getActiveSession(workspaceId, userId);
+        if (!active) {
+          return {
+            success: false,
+            command: trimmed,
+            output: 'No active focus session to pause.',
+            timestamp,
+          };
+        }
+        const paused = await focusService.pauseFocusSession(active.id, userId);
+        return {
+          success: true,
+          command: trimmed,
+          output: `Focus session paused at ${Math.round(paused.actualSeconds / 60)} minutes.`,
+          data: { session: paused },
+          timestamp,
+        };
+      }
+
+      // time complete / time stop
+      if (timeSub === 'complete' || timeSub === 'stop') {
+        const active = await focusService.getActiveSession(workspaceId, userId);
+        if (!active) {
+          return {
+            success: false,
+            command: trimmed,
+            output: 'No active focus session to complete.',
+            timestamp,
+          };
+        }
+        const completed = await focusService.completeFocusSession(active.id, userId);
+        return {
+          success: true,
+          command: trimmed,
+          output: `Focus session completed! Logged ${Math.round(completed.actualSeconds / 60)} minutes.`,
+          data: { session: completed },
+          timestamp,
+        };
+      }
+    }
+
+    // ─── GOAL COMMANDS ─────────────────────────────────────────────────────────
+    if (rootCommand === 'goal' || rootCommand === 'goals') {
+      const goals = await goalsService.getGoals(workspaceId);
+      if (goals.length === 0) {
+        return {
+          success: true,
+          command: trimmed,
+          output: 'No goals found. Create goals to track strategic milestones.',
+          data: { goals: [] },
+          timestamp,
+        };
+      }
+
+      const lines = goals.map(
+        (g) => `  [${g.status.padEnd(11)}] ${g.title}: ${g.currentValue}/${g.targetValue} ${g.unit} (${g.progressPercentage}%)`
+      );
+
+      return {
+        success: true,
+        command: trimmed,
+        output: [`Strategic Objectives & Goals (${goals.length}):`, ...lines].join('\n'),
+        data: { goals },
+        timestamp,
+      };
+    }
+
+    // ─── NOTIFICATION COMMANDS ─────────────────────────────────────────────────
+    if (rootCommand === 'notify' || rootCommand === 'notifications') {
+      const notifySub = subCommand || 'list';
+
+      if (notifySub === 'clear') {
+        const res = await notificationsService.markAllAsRead(workspaceId, userId);
+        return {
+          success: true,
+          command: trimmed,
+          output: `Cleared all unread notifications (${res.count} updated).`,
+          timestamp,
+        };
+      }
+
+      const notifs = await notificationsService.getUserNotifications(workspaceId, userId, { unreadOnly: true });
+      if (notifs.notifications.length === 0) {
+        return {
+          success: true,
+          command: trimmed,
+          output: 'No unread notifications.',
+          data: notifs,
+          timestamp,
+        };
+      }
+
+      const lines = notifs.notifications.map((n) => `  • [${n.type}] ${n.title} — ${n.message}`);
+      return {
+        success: true,
+        command: trimmed,
+        output: [`Unread Notifications (${notifs.unreadCount}):`, ...lines].join('\n'),
+        data: notifs,
+        timestamp,
+      };
     }
 
     // Unknown command

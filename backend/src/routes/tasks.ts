@@ -16,18 +16,14 @@ router.get('/events', async (req: Request, res: Response): Promise<void> => {
     const userId = req.userId!;
     const ws = await getOrCreateUserWorkspace(userId);
 
-    // Set SSE headers
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no', // Disable buffering for Nginx/proxies
-    });
-
     realtimeHub.registerClient(ws.workspaceId, userId, res);
   } catch (error) {
     console.error('SSE register error:', error);
-    res.status(500).end();
+    if (!res.headersSent) {
+      res.status(500).end();
+    } else {
+      res.end();
+    }
   }
 });
 
@@ -524,6 +520,38 @@ router.post('/:id/comments', async (req: Request, res: Response): Promise<void> 
     res.status(500).json({
       success: false,
       error: { code: 'INTERNAL_ERROR', message: error.message || 'Failed to add comment' },
+    });
+  }
+});
+
+// ─── GET /api/tasks/activity (Recent Workspace Activities) ───────────────────
+router.get('/activity', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.userId!;
+    const ws = await getOrCreateUserWorkspace(userId);
+    const limit = Math.min(parseInt(req.query.limit as string) || 30, 100);
+
+    const activities = await prisma.taskActivity.findMany({
+      where: {
+        task: { workspaceId: ws.workspaceId },
+      },
+      include: {
+        user: { select: { id: true, displayName: true, email: true, avatarUrl: true } },
+        task: { select: { id: true, title: true, status: true, priority: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+
+    res.json({
+      success: true,
+      data: { activities },
+    });
+  } catch (error: any) {
+    console.error('Task activity error:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: error.message || 'Failed to fetch task activities' },
     });
   }
 });

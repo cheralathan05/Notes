@@ -225,6 +225,9 @@ export class TasksService {
       startDate?: string | Date | null;
       dueDate?: string | Date | null;
       estimatedHours?: number | null;
+      branchName?: string | null;
+      acceptanceCriteria?: any;
+      repositoryId?: string | null;
     }
   ) {
     const task = await prisma.task.create({
@@ -243,6 +246,9 @@ export class TasksService {
         startDate: data.startDate ? new Date(data.startDate) : null,
         dueDate: data.dueDate ? new Date(data.dueDate) : null,
         estimatedHours: data.estimatedHours || null,
+        branchName: data.branchName || null,
+        acceptanceCriteria: data.acceptanceCriteria || null,
+        repositoryId: data.repositoryId || null,
       },
       include: {
         creator: { select: { id: true, displayName: true, email: true } },
@@ -640,63 +646,81 @@ export class TasksService {
   }
 
   async getTaskById(taskId: string) {
-    const task = await prisma.task.findUnique({
-      where: { id: taskId },
-      include: {
-        creator: { select: { id: true, displayName: true, email: true, avatarUrl: true } },
-        assignee: { select: { id: true, displayName: true, email: true, avatarUrl: true } },
-        project: { select: { id: true, name: true, color: true, icon: true, progress: true } },
-        milestone: { select: { id: true, title: true, isCompleted: true } },
-        document: { select: { id: true, title: true, icon: true, updatedAt: true } },
-        parent: { select: { id: true, title: true, status: true } },
-        subtasks: {
-          include: {
-            assignee: { select: { id: true, displayName: true, avatarUrl: true } },
-          },
-          orderBy: { createdAt: 'asc' },
+    const cleanId = taskId.replace(/^task-/i, '');
+    const includeConfig = {
+      creator: { select: { id: true, displayName: true, email: true, avatarUrl: true } },
+      assignee: { select: { id: true, displayName: true, email: true, avatarUrl: true } },
+      claimedBy: { select: { id: true, displayName: true, email: true } },
+      project: { select: { id: true, name: true, color: true, icon: true, progress: true } },
+      milestone: { select: { id: true, title: true, isCompleted: true } },
+      document: { select: { id: true, title: true, icon: true, updatedAt: true } },
+      parent: { select: { id: true, title: true, status: true } },
+      subtasks: {
+        include: {
+          assignee: { select: { id: true, displayName: true, avatarUrl: true } },
         },
-        checklists: {
-          orderBy: { orderIndex: 'asc' },
-        },
-        comments: {
-          include: {
-            user: { select: { id: true, displayName: true, email: true, avatarUrl: true } },
-          },
-          orderBy: { createdAt: 'asc' },
-        },
-        activities: {
-          include: {
-            user: { select: { id: true, displayName: true, avatarUrl: true } },
-          },
-          orderBy: { createdAt: 'desc' },
-          take: 25,
-        },
-        labels: {
-          include: { label: true },
-        },
-        blockedBy: {
-          include: {
-            blockingTask: {
-              select: {
-                id: true,
-                title: true,
-                status: true,
-                priority: true,
-                assignee: { select: { displayName: true } },
-              },
-            },
-          },
-        },
-        blocking: {
-          include: {
-            blockedTask: {
-              select: { id: true, title: true, status: true },
-            },
-          },
-        },
-        recurrence: true,
+        orderBy: { createdAt: 'asc' as const },
       },
+      checklists: {
+        orderBy: { orderIndex: 'asc' as const },
+      },
+      comments: {
+        include: {
+          user: { select: { id: true, displayName: true, email: true, avatarUrl: true } },
+        },
+        orderBy: { createdAt: 'asc' as const },
+      },
+      activities: {
+        include: {
+          user: { select: { id: true, displayName: true, avatarUrl: true } },
+        },
+        orderBy: { createdAt: 'desc' as const },
+        take: 25,
+      },
+      labels: {
+        include: { label: true },
+      },
+      blockedBy: {
+        include: {
+          blockingTask: {
+            select: {
+              id: true,
+              title: true,
+              status: true,
+              priority: true,
+              assignee: { select: { displayName: true } },
+            },
+          },
+        },
+      },
+      blocking: {
+        include: {
+          blockedTask: {
+            select: { id: true, title: true, status: true },
+          },
+        },
+      },
+      recurrence: true,
+    };
+
+    let task = await prisma.task.findUnique({
+      where: { id: cleanId },
+      include: includeConfig,
     });
+
+    if (!task) {
+      task = await prisma.task.findUnique({
+        where: { id: taskId },
+        include: includeConfig,
+      });
+    }
+
+    if (!task && cleanId.length >= 6) {
+      task = await prisma.task.findFirst({
+        where: { id: { startsWith: cleanId } },
+        include: includeConfig,
+      });
+    }
 
     if (!task) return null;
     return this.enrichTaskWithBlockers(task);

@@ -2,19 +2,23 @@
   "name": "workspace-saas-backend",
   "version": "1.0.0",
   "description": "Backend API for Productivity + AI Workspace SaaS",
-  "main": "dist/index.js",
+  "main": "dist/backend/src/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
-    "start": "node dist/index.js",
+    "build": "tsc && node -e \"try{require('fs').writeFileSync('dist/index.js', \\\"require('./backend/src/index.js');\\\")}catch(e){}\"",
+    "start": "node dist/backend/src/index.js",
     "test": "jest --config jest.config.ts",
     "test:watch": "jest --watch --config jest.config.ts",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
+    "test:email": "tsx scripts/test-email.ts",
     "prisma:generate": "prisma generate --schema=../prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --schema=../prisma/schema.prisma",
     "prisma:migrate:deploy": "prisma migrate deploy --schema=../prisma/schema.prisma",
-    "prisma:studio": "prisma studio --schema=../prisma/schema.prisma"
+    "prisma:db:push": "prisma db push --schema=../prisma/schema.prisma",
+    "prisma:studio": "prisma studio --schema=../prisma/schema.prisma",
+    "render:build": "npm run prisma:generate && npm run build",
+    "render:start": "npm run prisma:db:push && npm start"
   },
   "dependencies": {
     "@prisma/client": "^6.1.0",

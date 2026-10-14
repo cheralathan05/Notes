@@ -1,0 +1,54 @@
+services:
+  # ─── 1. Backend API Service (Express + Prisma) ──────────────────────────────
+  - type: web
+    name: kronos-backend
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: .
+    buildCommand: cd backend && npm install && npm run render:build
+    startCommand: cd backend && npm run render:start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: kronos-db
+          property: connectionString
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: FRONTEND_URL
+        fromService:
+          type: web
+          name: kronos-frontend
+          property: host
+      - key: COOKIE_SAME_SITE
+        value: none
+      - key: EMAIL_PROVIDER
+        value: console
+
+  # ─── 2. Frontend Web Service (Next.js) ──────────────────────────────────────
+  - type: web
+    name: kronos-frontend
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: kronos-backend
+          property: host
+
+databases:
+  # ─── 3. PostgreSQL Database ─────────────────────────────────────────────────
+  - name: kronos-db
+    plan: free
+    region: oregon
+    databaseName: workspace_saas
+    user: postgres

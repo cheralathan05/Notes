@@ -4,12 +4,13 @@ declare global {
         interface Request {
             userId?: string;
             sessionId?: string;
+            workspaceId?: string;
         }
     }
 }
 declare const SESSION_COOKIE_NAME = "session_token";
 /**
- * Extract session from cookie, validate against DB, attach user to request.
+ * Extract session or developer token, validate against DB, attach user to request.
  */
 export declare function authMiddleware(req: Request, res: Response, next: NextFunction): Promise<void>;
 /**

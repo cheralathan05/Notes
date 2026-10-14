@@ -26,55 +26,128 @@ class ConsoleEmailProvider implements EmailProvider {
   }
 }
 
-// ─── SMTP Email Provider ─────────────────────────────────────────────────────
+// ─── SMTP / Gmail Email Provider ─────────────────────────────────────────────
 
-class SmtpEmailProvider implements EmailProvider {
+export class SmtpEmailProvider implements EmailProvider {
   private transporter: nodemailer.Transporter;
   private from: string;
+  private serviceType: string;
 
   constructor() {
-    this.from = process.env.EMAIL_FROM || 'noreply@workspace.app';
-    this.transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || 'localhost',
-      port: parseInt(process.env.SMTP_PORT || '587', 10),
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: process.env.SMTP_USER ? {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      } : undefined,
-    });
+    const rawFrom = process.env.EMAIL_FROM || process.env.SMTP_USER || 'noreply@workspace.app';
+    const fromName = process.env.EMAIL_FROM_NAME || 'KRONOS Workspace';
+
+    // Format from field cleanly
+    if (rawFrom.includes('<') && rawFrom.includes('>')) {
+      this.from = rawFrom;
+    } else {
+      this.from = `"${fromName}" <${rawFrom}>`;
+    }
+
+    const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+    const port = parseInt(process.env.SMTP_PORT || '465', 10);
+    const user = (process.env.SMTP_USER || '').trim();
+    const pass = (process.env.SMTP_PASS || '').trim();
+    const service = (process.env.SMTP_SERVICE || '').toLowerCase().trim();
+
+    const isGmail =
+      service === 'gmail' ||
+      host.toLowerCase().includes('gmail') ||
+      (!process.env.SMTP_HOST && user.toLowerCase().endsWith('@gmail.com'));
+
+    this.serviceType = isGmail ? 'Gmail' : `SMTP (${host}:${port})`;
+
+    if (isGmail) {
+      this.transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: user
+          ? {
+              user,
+              pass,
+            }
+          : undefined,
+      });
+    } else {
+      const isSecure = process.env.SMTP_SECURE === 'true' || port === 465;
+      this.transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure: isSecure,
+        auth: user
+          ? {
+              user,
+              pass,
+            }
+          : undefined,
+        tls: {
+          rejectUnauthorized: process.env.NODE_ENV === 'production',
+        },
+      });
+    }
+  }
+
+  async verify(): Promise<{ success: boolean; message: string }> {
+    try {
+      await this.transporter.verify();
+      return { success: true, message: `SMTP connection established successfully via ${this.serviceType}` };
+    } catch (err: any) {
+      const msg = err?.message || 'SMTP handshake failed';
+      return { success: false, message: msg };
+    }
   }
 
   async send(message: EmailMessage): Promise<void> {
-    await this.transporter.sendMail({
-      from: this.from,
-      to: message.to,
-      subject: message.subject,
-      html: message.html,
-      text: message.text,
-    });
+    try {
+      const info = await this.transporter.sendMail({
+        from: this.from,
+        to: message.to,
+        subject: message.subject,
+        html: message.html,
+        text: message.text,
+      });
+      console.log(`📧 [EMAIL DELIVERED] Sent to: ${message.to} | Subject: "${message.subject}" | ID: ${info.messageId}`);
+    } catch (err: any) {
+      console.error(`❌ [EMAIL DISPATCH ERROR] Failed sending to ${message.to}:`, err.message);
+      if (err.code === 'EAUTH' || err.responseCode === 535) {
+        console.error('⚠️ SMTP Authentication Failed.');
+        console.error('💡 If you are using Gmail: You must generate a 16-character App Password at https://myaccount.google.com/apppasswords');
+        console.error('   Ensure 2-Step Verification is enabled, then create an App Password for "Mail" and set SMTP_PASS=xxxx-xxxx-xxxx-xxxx in your .env file.');
+      }
+      throw err;
+    }
   }
 }
 
 // ─── Provider Factory ────────────────────────────────────────────────────────
 
 let emailProvider: EmailProvider | null = null;
+let cachedConfigKey = '';
+
+export function resetEmailProvider(): void {
+  emailProvider = null;
+  cachedConfigKey = '';
+}
 
 export function getEmailProvider(): EmailProvider {
-  if (!emailProvider) {
-    const provider = process.env.EMAIL_PROVIDER || 'console';
-    switch (provider) {
-      case 'smtp':
-        emailProvider = new SmtpEmailProvider();
-        break;
-      case 'console':
-      default:
-        emailProvider = new ConsoleEmailProvider();
-        break;
+  const provider = (process.env.EMAIL_PROVIDER || '').toLowerCase().trim();
+  const smtpUser = (process.env.SMTP_USER || '').trim();
+  const smtpPass = (process.env.SMTP_PASS || '').trim();
+  const currentKey = `${provider}:${smtpUser}:${smtpPass}`;
+
+  if (!emailProvider || currentKey !== cachedConfigKey) {
+    cachedConfigKey = currentKey;
+    const hasSmtpConfig = Boolean(smtpUser || process.env.SMTP_HOST);
+
+    // If explicit smtp/gmail OR if user configured SMTP_USER and didn't force console
+    if (provider === 'smtp' || provider === 'gmail' || (hasSmtpConfig && provider !== 'console')) {
+      emailProvider = new SmtpEmailProvider();
+    } else {
+      emailProvider = new ConsoleEmailProvider();
     }
   }
   return emailProvider;
 }
+
 
 // ─── Email Templates ─────────────────────────────────────────────────────────
 

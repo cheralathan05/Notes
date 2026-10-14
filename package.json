@@ -1,4 +1,12 @@
 {
+  "name": "kronos-workspace-saas",
+  "version": "1.0.0",
+  "scripts": {
+    "prisma:generate": "prisma generate --schema=./prisma/schema.prisma",
+    "prisma:db:push": "prisma db push --schema=./prisma/schema.prisma",
+    "build:backend": "cd backend && npm install && npm run build",
+    "build:frontend": "cd frontend && npm install && npm run build"
+  },
   "devDependencies": {
     "prisma": "^6.19.3"
   },

@@ -103,6 +103,14 @@ export function ShareModal({ isOpen, onClose, documentId, documentTitle }: Share
       return;
     }
 
+    if (accessData?.owner && cleanEmail === accessData.owner.email.toLowerCase()) {
+      setInviteFeedback({
+        type: 'error',
+        text: 'You cannot invite yourself (you are already the document owner)',
+      });
+      return;
+    }
+
     setInviteSending(true);
     setInviteFeedback(null);
     try {
@@ -116,9 +124,10 @@ export function ShareModal({ isOpen, onClose, documentId, documentTitle }: Share
         setInviteEmail('');
         setInviteMessage('');
         setShowInviteMessage(false);
+        const isDelivered = res.data?.emailSent !== false;
         setInviteFeedback({
-          type: 'success',
-          text: `Invitation dispatched to ${cleanEmail}`,
+          type: isDelivered ? 'success' : 'error',
+          text: res.data?.message || (isDelivered ? `Invitation dispatched to ${cleanEmail}` : 'Invitation created but email delivery failed'),
         });
         await loadAccessData();
       } else {
@@ -180,7 +189,11 @@ export function ShareModal({ isOpen, onClose, documentId, documentTitle }: Share
       setSyncStatus('SAVING');
       const res = await api.resendInvitation(documentId, invitationId);
       if (res.success) {
-        setInviteFeedback({ type: 'success', text: `Invitation re-dispatched to ${email}` });
+        const isDelivered = res.data?.emailSent !== false;
+        setInviteFeedback({
+          type: isDelivered ? 'success' : 'error',
+          text: res.data?.message || (isDelivered ? `Invitation re-dispatched to ${email}` : 'Token refreshed, but email delivery failed'),
+        });
         setSyncStatus('SUCCESS');
         await loadAccessData();
       } else {
@@ -410,7 +423,10 @@ export function ShareModal({ isOpen, onClose, documentId, documentTitle }: Share
               </div>
               <button
                 type="button"
-                onClick={() => setError(null)}
+                onClick={() => {
+                  setError(null);
+                  setSyncStatus('IDLE');
+                }}
                 className="text-[#E57373] hover:text-white text-xs underline font-mono"
               >
                 DISMISS
@@ -517,92 +533,101 @@ export function ShareModal({ isOpen, onClose, documentId, documentTitle }: Share
                   )}
 
                   {/* People with Access */}
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-[11px] font-semibold text-[#A3A3A3] uppercase tracking-wider">
-                        PEOPLE WITH ACCESS ({1 + (accessData?.members?.length || 0)})
-                      </span>
-                    </div>
+                  {(() => {
+                    const filteredMembers = (accessData?.members || []).filter(
+                      (m) => !accessData?.owner || m.userId !== accessData.owner.id
+                    );
+                    const totalPeopleCount = (accessData?.owner ? 1 : 0) + filteredMembers.length;
 
-                    <div className="border border-[#222222] divide-y divide-[#1A1A1A] bg-[#101010]">
-                      {/* Document Owner */}
-                      {accessData?.owner && (
-                        <div className="p-3 flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="w-7 h-7 bg-[#222222] border border-[#333333] flex items-center justify-center font-mono text-xs text-[#F5F5F5] font-semibold">
-                              {accessData.owner.displayName.charAt(0).toUpperCase()}
-                            </div>
-                            <div>
-                              <div className="text-xs font-semibold text-[#F5F5F5]">
-                                {accessData.owner.displayName}
-                              </div>
-                              <div className="font-mono text-[11px] text-[#737373]">
-                                {accessData.owner.email}
-                              </div>
-                            </div>
-                          </div>
-                          <span className="font-mono text-[10px] px-2 py-0.5 bg-[#1B1B1B] text-[#F5F5F5] border border-[#2D2D2D] font-semibold">
-                            OWNER
+                    return (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="font-mono text-[11px] font-semibold text-[#A3A3A3] uppercase tracking-wider">
+                            PEOPLE WITH ACCESS ({totalPeopleCount})
                           </span>
                         </div>
-                      )}
 
-                      {/* Authorized Members */}
-                      {accessData?.members?.map((member) => (
-                        <div key={member.id} className="p-3 flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="w-7 h-7 bg-[#1A1A1A] border border-[#2D2D2D] flex items-center justify-center font-mono text-xs text-[#A3A3A3]">
-                              {member.displayName.charAt(0).toUpperCase()}
-                            </div>
-                            <div>
-                              <div className="text-xs font-semibold text-[#F5F5F5]">
-                                {member.displayName}
+                        <div className="border border-[#222222] divide-y divide-[#1A1A1A] bg-[#101010]">
+                          {/* Document Owner */}
+                          {accessData?.owner && (
+                            <div className="p-3 flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="w-7 h-7 bg-[#222222] border border-[#333333] flex items-center justify-center font-mono text-xs text-[#F5F5F5] font-semibold">
+                                  {accessData.owner.displayName.charAt(0).toUpperCase()}
+                                </div>
+                                <div>
+                                  <div className="text-xs font-semibold text-[#F5F5F5]">
+                                    {accessData.owner.displayName}
+                                  </div>
+                                  <div className="font-mono text-[11px] text-[#737373]">
+                                    {accessData.owner.email}
+                                  </div>
+                                </div>
                               </div>
-                              <div className="font-mono text-[11px] text-[#737373]">
-                                {member.email}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            {isOwner ? (
-                              <>
-                                <select
-                                  value={member.role}
-                                  onChange={(e) =>
-                                    handleUpdateRole(member.userId, e.target.value as DocumentRoleType)
-                                  }
-                                  className="bg-[#0D0D0D] border border-[#2B2B2B] text-[11px] text-[#F5F5F5] px-2 py-1 font-mono focus:outline-none"
-                                >
-                                  <option value="VIEWER">VIEWER</option>
-                                  <option value="COMMENTER">COMMENTER</option>
-                                  <option value="EDITOR">EDITOR</option>
-                                </select>
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveCollaborator(member.userId, member.displayName)}
-                                  className="p-1 text-[#737373] hover:text-[#E57373] transition-colors"
-                                  title="Revoke access"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              </>
-                            ) : (
-                              <span className="font-mono text-[10px] px-2 py-0.5 bg-[#181818] text-[#A3A3A3] border border-[#2D2D2D]">
-                                {member.role}
+                              <span className="font-mono text-[10px] px-2 py-0.5 bg-[#1B1B1B] text-[#F5F5F5] border border-[#2D2D2D] font-semibold">
+                                OWNER
                               </span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
+                            </div>
+                          )}
 
-                      {(!accessData?.members || accessData.members.length === 0) && (
-                        <div className="p-4 text-center text-xs text-[#737373] font-mono">
-                          NO EXTERNAL COLLABORATORS YET.
+                          {/* Authorized Collaborators (excludes owner) */}
+                          {filteredMembers.map((member) => (
+                            <div key={member.id} className="p-3 flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="w-7 h-7 bg-[#1A1A1A] border border-[#2D2D2D] flex items-center justify-center font-mono text-xs text-[#A3A3A3]">
+                                  {member.displayName.charAt(0).toUpperCase()}
+                                </div>
+                                <div>
+                                  <div className="text-xs font-semibold text-[#F5F5F5]">
+                                    {member.displayName}
+                                  </div>
+                                  <div className="font-mono text-[11px] text-[#737373]">
+                                    {member.email}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                {isOwner ? (
+                                  <>
+                                    <select
+                                      value={member.role}
+                                      onChange={(e) =>
+                                        handleUpdateRole(member.userId, e.target.value as DocumentRoleType)
+                                      }
+                                      className="bg-[#0D0D0D] border border-[#2B2B2B] text-[11px] text-[#F5F5F5] px-2 py-1 font-mono focus:outline-none"
+                                    >
+                                      <option value="VIEWER">VIEWER</option>
+                                      <option value="COMMENTER">COMMENTER</option>
+                                      <option value="EDITOR">EDITOR</option>
+                                    </select>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveCollaborator(member.userId, member.displayName)}
+                                      className="p-1 text-[#737373] hover:text-[#E57373] transition-colors"
+                                      title="Revoke access"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  </>
+                                ) : (
+                                  <span className="font-mono text-[10px] px-2 py-0.5 bg-[#181818] text-[#A3A3A3] border border-[#2D2D2D]">
+                                    {member.role}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+
+                          {filteredMembers.length === 0 && (
+                            <div className="p-4 text-center text-xs text-[#737373] font-mono">
+                              NO ADDITIONAL COLLABORATORS ASSIGNED. INVITE TEAM MEMBERS ABOVE.
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Pending Invitations */}
                   {accessData?.pendingInvitations && accessData.pendingInvitations.length > 0 && (

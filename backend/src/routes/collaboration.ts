@@ -223,7 +223,7 @@ router.post('/invitations/accept', async (req: Request, res: Response): Promise<
     const invitation = await prisma.documentInvitation.findUnique({
       where: { tokenHash },
       include: {
-        document: { select: { id: true, title: true, workspaceId: true } },
+        document: { select: { id: true, title: true, workspaceId: true, creatorId: true } },
       },
     });
 
@@ -272,6 +272,27 @@ router.post('/invitations/accept', async (req: Request, res: Response): Promise<
         error: {
           code: 'EMAIL_MISMATCH',
           message: `This invitation was issued to ${invitation.recipientEmail}. You are authenticated as ${user.email}.`,
+        },
+      });
+      return;
+    }
+
+    // If the accepting user is the document creator, retain inherent OWNER rights
+    if (invitation.document.creatorId === userId) {
+      await prisma.documentInvitation.update({
+        where: { id: invitation.id },
+        data: {
+          status: 'ACCEPTED',
+          acceptedAt: new Date(),
+        },
+      });
+      res.json({
+        success: true,
+        data: {
+          documentId: invitation.documentId,
+          documentTitle: invitation.document.title,
+          role: 'OWNER',
+          message: 'You are the primary creator and retain sovereign OWNER access.',
         },
       });
       return;
@@ -347,9 +368,12 @@ router.get('/:id/access', async (req: Request, res: Response): Promise<void> => 
 
     const doc = authCheck.document;
 
-    // 1. Fetch Collaborator Memberships
+    // 1. Fetch Collaborator Memberships (Strictly exclude primary creator to avoid duplicate entries)
     const memberships = await prisma.documentMembership.findMany({
-      where: { documentId },
+      where: {
+        documentId,
+        userId: { not: doc.creatorId },
+      },
       include: {
         user: { select: { id: true, displayName: true, email: true, avatarUrl: true } },
       },
@@ -477,6 +501,37 @@ router.post('/:id/invitations', async (req: Request, res: Response): Promise<voi
       return;
     }
 
+    // Check if recipient is the primary document creator
+    if (
+      authCheck.document.creator.emailNormalized === normalizedEmail ||
+      authCheck.document.creator.email.toLowerCase() === normalizedEmail
+    ) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'CANNOT_INVITE_CREATOR',
+          message: 'The document creator already holds sovereign OWNER privileges.',
+        },
+      });
+      return;
+    }
+
+    const existingUser = await prisma.user.findFirst({
+      where: { emailNormalized: normalizedEmail },
+      select: { id: true },
+    });
+
+    if (existingUser && existingUser.id === authCheck.document.creatorId) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'CANNOT_INVITE_CREATOR',
+          message: 'User is the creator and owner of this document.',
+        },
+      });
+      return;
+    }
+
     // Check if recipient is already an active collaborator with this role
     const existingMember = await prisma.documentMembership.findFirst({
       where: {
@@ -488,7 +543,10 @@ router.post('/:id/invitations', async (req: Request, res: Response): Promise<voi
     if (existingMember) {
       res.status(409).json({
         success: false,
-        error: { code: 'ALREADY_COLLABORATOR', message: 'User is already an authorized collaborator on this document' },
+        error: {
+          code: 'ALREADY_COLLABORATOR',
+          message: `User is already an active ${existingMember.role} on this document. You can adjust permissions directly in the collaborator list.`,
+        },
       });
       return;
     }
@@ -538,10 +596,19 @@ router.post('/:id/invitations', async (req: Request, res: Response): Promise<voi
       message
     );
 
-    await emailProvider.send({
-      to: normalizedEmail,
-      ...emailData,
-    });
+    let emailSent = false;
+    let emailErrorMessage: string | null = null;
+
+    try {
+      await emailProvider.send({
+        to: normalizedEmail,
+        ...emailData,
+      });
+      emailSent = true;
+    } catch (mailError: any) {
+      console.error('⚠️ Invitation email delivery warning:', mailError?.message || mailError);
+      emailErrorMessage = mailError?.message || 'SMTP delivery issue';
+    }
 
     // Activity log
     await prisma.documentActivity.create({
@@ -563,7 +630,10 @@ router.post('/:id/invitations', async (req: Request, res: Response): Promise<voi
           expiresAt: invitation.expiresAt,
           status: invitation.status,
         },
-        message: `Invitation successfully dispatched to ${normalizedEmail}`,
+        emailSent,
+        message: emailSent
+          ? `Invitation successfully dispatched to ${normalizedEmail}`
+          : `Invitation registered, but SMTP email delivery failed: ${emailErrorMessage || 'Authentication/connection error'}. Check .env credentials.`,
       },
     });
   } catch (error) {
@@ -633,16 +703,28 @@ router.post('/:id/invitations/:invitationId/resend', async (req: Request, res: R
       updated.message || undefined
     );
 
-    await emailProvider.send({
-      to: updated.recipientEmail,
-      ...emailData,
-    });
+    let emailSent = false;
+    let emailErrorMessage: string | null = null;
+
+    try {
+      await emailProvider.send({
+        to: updated.recipientEmail,
+        ...emailData,
+      });
+      emailSent = true;
+    } catch (mailError: any) {
+      console.error('⚠️ Resend email delivery warning:', mailError?.message || mailError);
+      emailErrorMessage = mailError?.message || 'SMTP delivery issue';
+    }
 
     res.json({
       success: true,
       data: {
         invitation: updated,
-        message: 'Invitation resent successfully',
+        emailSent,
+        message: emailSent
+          ? 'Invitation resent successfully'
+          : `Token refreshed, but email dispatch failed: ${emailErrorMessage}. Check .env credentials.`,
       },
     });
   } catch (error) {
@@ -925,6 +1007,87 @@ router.post('/:id/public-link', async (req: Request, res: Response): Promise<voi
     });
   }
 });
+
+// ─── POST /api/documents/:id/share (Legacy & Test Suite Alias for Public Share) ─
+router.post('/:id/share', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.userId!;
+    const documentId = req.params.id as string;
+    const { isPublic = true, permission = 'VIEW' } = req.body;
+
+    const authCheck = await verifyDocumentPermission(userId, documentId, 'OWNER');
+    if (!authCheck.allowed) {
+      res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Only document owners can manage sharing' },
+      });
+      return;
+    }
+
+    let publicLink = await prisma.documentPublicLink.findUnique({
+      where: { documentId },
+    });
+
+    const publicToken = publicLink?.publicToken || crypto.randomBytes(16).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(publicToken).digest('hex');
+
+    if (!publicLink) {
+      publicLink = await prisma.documentPublicLink.create({
+        data: {
+          documentId,
+          publicToken,
+          tokenHash,
+          permission: permission === 'EDIT' ? 'EDIT' : 'VIEW',
+          isEnabled: Boolean(isPublic),
+          createdById: userId,
+        },
+      });
+    } else {
+      publicLink = await prisma.documentPublicLink.update({
+        where: { id: publicLink.id },
+        data: {
+          isEnabled: Boolean(isPublic),
+          permission: permission === 'EDIT' ? 'EDIT' : 'VIEW',
+          revokedAt: isPublic ? null : new Date(),
+        },
+      });
+    }
+
+    // Also update legacy DocumentShare
+    const share = await prisma.documentShare.upsert({
+      where: { shareToken: publicToken },
+      update: {
+        isPublic: Boolean(isPublic),
+        permission: permission === 'EDIT' ? 'EDIT' : 'VIEW',
+      },
+      create: {
+        documentId,
+        isPublic: Boolean(isPublic),
+        permission: permission === 'EDIT' ? 'EDIT' : 'VIEW',
+        shareToken: publicToken,
+      },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        id: share.id,
+        documentId,
+        isPublic: Boolean(isPublic),
+        permission: publicLink.permission,
+        shareToken: publicToken,
+        publicUrl: `${APP_URL}/share/${publicToken}`,
+      },
+    });
+  } catch (error) {
+    console.error('Share document error:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to update sharing settings' },
+    });
+  }
+});
+
 
 // ─── POST /api/documents/:id/publish (Publish Document Release) ───────────────
 router.post('/:id/publish', async (req: Request, res: Response): Promise<void> => {
