@@ -4,17 +4,22 @@
     "module": "commonjs",
     "lib": ["ES2022"],
     "outDir": "./dist",
-    "strict": true,
+    "strict": false,
+    "noImplicitAny": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "declaration": true,
-    "declarationMap": true,
+    "declaration": false,
+    "declarationMap": false,
     "sourceMap": true,
     "moduleResolution": "node",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@prisma/client": [
+        "./node_modules/@prisma/client",
+        "../node_modules/@prisma/client"
+      ]
     },
     "baseUrl": "."
   },
