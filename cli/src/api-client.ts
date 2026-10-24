@@ -108,10 +108,17 @@ export class AtlasApiClient {
     localPath?: string;
     workspaceId?: string;
     projectId?: string;
+    latestCommit?: string;
   }) {
     return this.request<{ repository: any; message: string }>('/api/repositories/connect', {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+  }
+
+  async syncRepository(repoId: string) {
+    return this.request<{ repository: any; liveMeta: any; message: string }>(`/api/repositories/${repoId}/sync`, {
+      method: 'POST',
     });
   }
 

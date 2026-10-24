@@ -106,6 +106,15 @@ export class TasksService {
         creator: { select: { id: true, displayName: true, email: true, avatarUrl: true } },
         assignee: { select: { id: true, displayName: true, email: true, avatarUrl: true } },
         project: { select: { id: true, name: true, color: true, icon: true } },
+        repository: { select: { id: true, name: true, slug: true, defaultBranch: true } },
+        collaborators: {
+          include: {
+            user: { select: { id: true, displayName: true, email: true, avatarUrl: true } },
+          },
+        },
+        codeReviews: {
+          select: { id: true, title: true, status: true, sourceBranch: true },
+        },
         milestone: { select: { id: true, title: true } },
         document: { select: { id: true, title: true, icon: true } },
         subtasks: {
@@ -149,6 +158,18 @@ export class TasksService {
         creator: { select: { id: true, displayName: true, email: true, avatarUrl: true } },
         assignee: { select: { id: true, displayName: true, email: true, avatarUrl: true } },
         project: { select: { id: true, name: true, color: true, icon: true, progress: true } },
+        repository: { select: { id: true, name: true, slug: true, defaultBranch: true } },
+        collaborators: {
+          include: {
+            user: { select: { id: true, displayName: true, email: true, avatarUrl: true } },
+          },
+        },
+        codeReviews: {
+          include: {
+            author: { select: { id: true, displayName: true, email: true, avatarUrl: true } },
+          },
+          orderBy: { updatedAt: 'desc' },
+        },
         milestone: { select: { id: true, title: true, isCompleted: true } },
         document: { select: { id: true, title: true, icon: true, updatedAt: true } },
         parent: { select: { id: true, title: true, status: true } },
@@ -230,6 +251,22 @@ export class TasksService {
       repositoryId?: string | null;
     }
   ) {
+    if (data.assigneeId) {
+      const membership = await prisma.workspaceMember.findUnique({
+        where: {
+          workspaceId_userId: {
+            workspaceId,
+            userId: data.assigneeId,
+          },
+        },
+      });
+      if (!membership) {
+        const err: any = new Error('Assignee is not a member of this workspace');
+        err.code = 'UNAUTHORIZED_ASSIGNEE';
+        throw err;
+      }
+    }
+
     const task = await prisma.task.create({
       data: {
         workspaceId,
@@ -267,6 +304,21 @@ export class TasksService {
       },
     });
 
+    // Notify assignee if assigned to someone else
+    if (data.assigneeId && data.assigneeId !== userId) {
+      await prisma.notification.create({
+        data: {
+          workspaceId,
+          recipientId: data.assigneeId,
+          actorId: userId,
+          type: 'TASK_ASSIGNED',
+          title: 'Task Assigned To You',
+          message: `You were assigned to task "${task.title}".`,
+          linkUrl: `/tasks`,
+        },
+      }).catch((err) => console.warn('Notification create warning:', err?.message || err));
+    }
+
     // Recalculate project progress if linked
     if (task.projectId) {
       await projectsService.recalculateProjectProgress(task.projectId);
@@ -296,6 +348,10 @@ export class TasksService {
       estimatedHours?: number | null;
       actualHours?: number | null;
       isArchived?: boolean;
+      branchName?: string | null;
+      repositoryId?: string | null;
+      acceptanceCriteria?: any;
+      isVerified?: boolean;
     }
   ) {
     const existing = await prisma.task.findFirst({
@@ -326,14 +382,55 @@ export class TasksService {
 
     // Status transition logic
     if (data.status && data.status !== existing.status) {
-      updates.status = data.status;
       if (data.status === 'DONE') {
+        // Guard 1: Verify active blocking dependencies
+        const unfinishedBlockers = await prisma.taskDependency.findMany({
+          where: {
+            blockedTaskId: taskId,
+            blockingTask: { status: { not: 'DONE' } },
+          },
+          include: {
+            blockingTask: { select: { id: true, title: true, status: true } },
+          },
+        });
+
+        if (unfinishedBlockers.length > 0) {
+          const blockerTitles = unfinishedBlockers.map((b) => b.blockingTask.title).join(', ');
+          const err: any = new Error(
+            `Cannot mark task DONE: Blocked by unfinished predecessor tasks (${blockerTitles})`
+          );
+          err.code = 'TASK_BLOCKED';
+          throw err;
+        }
+
+        // Guard 2: Verify active subtasks
+        const unfinishedSubtasks = await prisma.task.findMany({
+          where: {
+            parentId: taskId,
+            isArchived: false,
+            status: { not: 'DONE' },
+          },
+          select: { id: true, title: true, status: true },
+        });
+
+        if (unfinishedSubtasks.length > 0) {
+          const subtaskTitles = unfinishedSubtasks.map((s) => s.title).join(', ');
+          const err: any = new Error(
+            `Cannot mark task DONE: Task has ${unfinishedSubtasks.length} unfinished subtask(s) (${subtaskTitles})`
+          );
+          err.code = 'UNFINISHED_SUBTASKS';
+          throw err;
+        }
+
+        updates.status = 'DONE';
         updates.completedAt = new Date();
         activitiesToCreate.push({ action: 'TASK_COMPLETED' });
       } else if (existing.status === 'DONE') {
+        updates.status = data.status;
         updates.completedAt = null;
         activitiesToCreate.push({ action: 'TASK_REOPENED' });
       } else {
+        updates.status = data.status;
         activitiesToCreate.push({
           action: 'STATUS_CHANGED',
           metadata: { from: existing.status, to: data.status },
@@ -342,7 +439,22 @@ export class TasksService {
     }
 
     if (data.assigneeId !== undefined && data.assigneeId !== existing.assigneeId) {
-      updates.assigneeId = data.assigneeId;
+      if (data.assigneeId) {
+        const membership = await prisma.workspaceMember.findUnique({
+          where: {
+            workspaceId_userId: {
+              workspaceId,
+              userId: data.assigneeId,
+            },
+          },
+        });
+        if (!membership) {
+          const err: any = new Error('Assignee is not a member of this workspace');
+          err.code = 'UNAUTHORIZED_ASSIGNEE';
+          throw err;
+        }
+      }
+      updates.assigneeId = data.assigneeId || null;
       activitiesToCreate.push({
         action: 'ASSIGNED',
         metadata: { assigneeId: data.assigneeId },
@@ -361,8 +473,14 @@ export class TasksService {
     if (data.projectId !== undefined) updates.projectId = data.projectId;
     if (data.milestoneId !== undefined) updates.milestoneId = data.milestoneId;
     if (data.estimatedHours !== undefined) updates.estimatedHours = data.estimatedHours;
-    if (data.actualHours !== undefined) updates.actualHours = data.actualHours;
     if (data.isArchived !== undefined) updates.isArchived = data.isArchived;
+    if (data.branchName !== undefined) updates.branchName = data.branchName ? data.branchName.trim() : null;
+    if (data.repositoryId !== undefined) updates.repositoryId = data.repositoryId || null;
+    if (data.acceptanceCriteria !== undefined) updates.acceptanceCriteria = data.acceptanceCriteria;
+    if (data.isVerified !== undefined) {
+      updates.isVerified = !!data.isVerified;
+      if (data.isVerified) updates.verifiedAt = new Date();
+    }
 
     const updatedTask = await prisma.task.update({
       where: { id: taskId },
@@ -384,6 +502,42 @@ export class TasksService {
           metadata: act.metadata || null,
         },
       });
+    }
+
+    // Notify new assignee if changed and not self
+    if (data.assigneeId && data.assigneeId !== userId && data.assigneeId !== existing.assigneeId) {
+      await prisma.notification.create({
+        data: {
+          workspaceId,
+          recipientId: data.assigneeId,
+          actorId: userId,
+          type: 'TASK_ASSIGNED',
+          title: 'Task Assigned To You',
+          message: `You were assigned to task "${updatedTask.title}".`,
+          linkUrl: `/tasks`,
+        },
+      }).catch((err) => console.warn('Notification create warning:', err?.message || err));
+    }
+
+    // Notify assignee / creator on status change if updater is different
+    if (data.status && data.status !== existing.status) {
+      const recipientId = updatedTask.assigneeId && updatedTask.assigneeId !== userId
+        ? updatedTask.assigneeId
+        : (updatedTask.creatorId !== userId ? updatedTask.creatorId : null);
+
+      if (recipientId) {
+        await prisma.notification.create({
+          data: {
+            workspaceId,
+            recipientId,
+            actorId: userId,
+            type: 'TASK_STATUS_CHANGED',
+            title: 'Task Status Updated',
+            message: `Task "${updatedTask.title}" transitioned to ${data.status}.`,
+            linkUrl: `/tasks`,
+          },
+        }).catch((err) => console.warn('Notification create warning:', err?.message || err));
+      }
     }
 
     // Recalculate project progress
@@ -726,31 +880,40 @@ export class TasksService {
     return this.enrichTaskWithBlockers(task);
   }
 
-  async getMyDayTasks(workspaceId: string, _userId: string) {
+  async getMyDayTasks(workspaceId: string, userId: string) {
     const all = await this.listTasks(workspaceId, { isArchived: false });
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
-    const today = all.filter(
+    // Personal scope: tasks assigned to user, or user is collaborator, or created by user without an assignee
+    const myTasks = all.filter((t: any) => {
+      if (t.assigneeId === userId) return true;
+      if (t.collaborators && t.collaborators.some((c: any) => c.userId === userId || c.user?.id === userId)) return true;
+      if (!t.assigneeId && t.creatorId === userId) return true;
+      return false;
+    });
+
+    const today = myTasks.filter(
       (t: any) =>
         t.dueDate &&
         new Date(t.dueDate) >= startOfToday &&
         new Date(t.dueDate) <= endOfToday &&
         t.status !== 'DONE'
     );
-    const overdue = all.filter(
+    const overdue = myTasks.filter(
       (t: any) =>
         t.dueDate &&
         new Date(t.dueDate) < startOfToday &&
         t.status !== 'DONE' &&
         t.status !== 'CANCELLED'
     );
-    const upcoming = all.filter(
+    const upcoming = myTasks.filter(
       (t: any) => t.dueDate && new Date(t.dueDate) > endOfToday && t.status !== 'DONE'
     );
-    const completed = all.filter((t: any) => t.status === 'DONE');
-    const waitingOnOthers = all.filter((t: any) => t.isBlocked && t.status !== 'DONE');
+    const completed = myTasks.filter((t: any) => t.status === 'DONE');
+    const waitingOnOthers = myTasks.filter((t: any) => t.isBlocked && t.status !== 'DONE');
+    const inProgress = myTasks.filter((t: any) => (t.status === 'IN_PROGRESS' || t.status === 'IN_REVIEW'));
 
     return {
       today,
@@ -758,18 +921,65 @@ export class TasksService {
       upcoming,
       completed,
       waitingOnOthers,
+      inProgress,
       stats: {
         todayCount: today.length,
         overdueCount: overdue.length,
         upcomingCount: upcoming.length,
         completedCount: completed.length,
         blockedCount: waitingOnOthers.length,
+        inProgressCount: inProgress.length,
       },
     };
   }
 
-  async bulkUpdate(workspaceId: string, taskIds: string[], action: any, data?: any) {
-    return this.bulkTaskOperation('system', workspaceId, action, taskIds, data);
+  async bulkUpdate(workspaceId: string, taskIds: string[], action: any, data?: any, userId: string = 'system') {
+    return this.bulkTaskOperation(userId, workspaceId, action, taskIds, data);
+  }
+
+  /**
+   * Task Labels Management
+   */
+  async getLabels(workspaceId: string) {
+    return prisma.taskLabel.findMany({
+      where: { workspaceId },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async createLabel(workspaceId: string, name: string, color?: string) {
+    return prisma.taskLabel.upsert({
+      where: {
+        workspaceId_name: {
+          workspaceId,
+          name: name.trim().toLowerCase(),
+        },
+      },
+      update: { color: color || '#737373' },
+      create: {
+        workspaceId,
+        name: name.trim().toLowerCase(),
+        color: color || '#737373',
+      },
+    });
+  }
+
+  async addLabelToTask(taskId: string, labelId: string) {
+    return prisma.taskLabelAssignment.upsert({
+      where: {
+        taskId_labelId: { taskId, labelId },
+      },
+      update: {},
+      create: { taskId, labelId },
+      include: { label: true },
+    });
+  }
+
+  async removeLabelFromTask(taskId: string, labelId: string) {
+    await prisma.taskLabelAssignment.deleteMany({
+      where: { taskId, labelId },
+    });
+    return { success: true };
   }
 }
 

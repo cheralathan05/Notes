@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { authMiddleware } from '../middleware/auth';
-import { getOrCreateUserWorkspace, verifyWorkspaceMembership } from '../lib/workspace';
+import { resolveWorkspaceContext, verifyWorkspaceMembership } from '../lib/workspace';
 
 const router = Router();
 router.use(authMiddleware);
@@ -195,7 +195,7 @@ router.get('/:id/export', async (req: Request, res: Response): Promise<void> => 
 router.post('/import', async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.userId!;
-    const ws = await getOrCreateUserWorkspace(userId);
+    const ws = await resolveWorkspaceContext(req);
     const { title = 'Imported Document', contentText, format = 'markdown', folderId = null } = req.body;
 
     if (!contentText || typeof contentText !== 'string') {
@@ -296,7 +296,7 @@ router.post('/import', async (req: Request, res: Response): Promise<void> => {
 router.get('/export-all', async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.userId!;
-    const ws = await getOrCreateUserWorkspace(userId);
+    const ws = await resolveWorkspaceContext(req);
 
     const documents = await prisma.document.findMany({
       where: { workspaceId: ws.workspaceId, isDeleted: false },
@@ -342,7 +342,7 @@ router.get('/export-all', async (req: Request, res: Response): Promise<void> => 
 router.post('/restore-backup', async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.userId!;
-    const ws = await getOrCreateUserWorkspace(userId);
+    const ws = await resolveWorkspaceContext(req);
     const { documents } = req.body;
 
     if (!Array.isArray(documents) || documents.length === 0) {

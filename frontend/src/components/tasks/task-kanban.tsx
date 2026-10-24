@@ -11,6 +11,8 @@ import {
   Folder,
   CheckSquare,
   ShieldAlert,
+  User,
+  X,
 } from 'lucide-react';
 
 interface TaskKanbanProps {
@@ -18,13 +20,16 @@ interface TaskKanbanProps {
   projects: ProjectItem[];
   onSelectTask: (taskId: string) => void;
   onRefresh: () => void;
+  onOpenCreateWithStatus?: (status: TaskStatusType) => void;
 }
 
 const COLUMNS: { id: TaskStatusType; label: string; wipLimit?: number }[] = [
+  { id: 'BACKLOG', label: 'Backlog' },
   { id: 'TODO', label: 'To Do' },
   { id: 'IN_PROGRESS', label: 'In Progress', wipLimit: 6 },
   { id: 'IN_REVIEW', label: 'In Review', wipLimit: 4 },
   { id: 'DONE', label: 'Done' },
+  { id: 'CANCELLED', label: 'Cancelled' },
 ];
 
 export function TaskKanban({
@@ -32,10 +37,13 @@ export function TaskKanban({
   projects,
   onSelectTask,
   onRefresh,
+  onOpenCreateWithStatus,
 }: TaskKanbanProps) {
   const [quickTitleByCol, setQuickTitleByCol] = useState<Record<string, string>>({});
   const [addingCol, setAddingCol] = useState<string | null>(null);
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
+  const [dragOverCol, setDragOverCol] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const getPriorityBadge = (priority: TaskPriorityType) => {
     switch (priority) {
@@ -63,8 +71,13 @@ export function TaskKanban({
             LOW
           </span>
         );
+      case 'NONE':
       default:
-        return null;
+        return (
+          <span className="px-1.5 py-0.5 rounded text-[10px] text-neutral-500 bg-neutral-900 border border-neutral-800">
+            NONE
+          </span>
+        );
     }
   };
 
@@ -73,12 +86,18 @@ export function TaskKanban({
     setDraggedTaskId(taskId);
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragOver = (e: React.DragEvent, colId: string) => {
     e.preventDefault();
+    setDragOverCol(colId);
+  };
+
+  const handleDragLeave = () => {
+    setDragOverCol(null);
   };
 
   const handleDrop = async (e: React.DragEvent, targetStatus: TaskStatusType) => {
     e.preventDefault();
+    setDragOverCol(null);
     const taskId = e.dataTransfer.getData('text/plain') || draggedTaskId;
     setDraggedTaskId(null);
 
@@ -86,11 +105,17 @@ export function TaskKanban({
     const task = tasks.find((t) => t.id === taskId);
     if (!task || task.status === targetStatus) return;
 
+    setActionError(null);
     try {
-      await api.updateTask(taskId, { status: targetStatus });
-      onRefresh();
-    } catch (err) {
+      const res = await api.updateTask(taskId, { status: targetStatus });
+      if (!res.success) {
+        setActionError(res.error?.message || 'Failed to update task status');
+      } else {
+        onRefresh();
+      }
+    } catch (err: any) {
       console.error('Drag and drop status update failed:', err);
+      setActionError(err.message || 'Failed to persist status transition');
     }
   };
 
@@ -100,16 +125,21 @@ export function TaskKanban({
     if (!title) return;
 
     try {
-      await api.createTask({
+      const res = await api.createTask({
         title,
         status,
         priority: 'MEDIUM',
       });
-      setQuickTitleByCol((prev) => ({ ...prev, [status]: '' }));
-      setAddingCol(null);
-      onRefresh();
-    } catch (err) {
+      if (res.success) {
+        setQuickTitleByCol((prev) => ({ ...prev, [status]: '' }));
+        setAddingCol(null);
+        onRefresh();
+      } else {
+        setActionError(res.error?.message || 'Failed to create task');
+      }
+    } catch (err: any) {
       console.error('Quick task creation failed:', err);
+      setActionError(err.message || 'Failed to create task');
     }
   };
 
@@ -119,18 +149,36 @@ export function TaskKanban({
   };
 
   return (
-    <div className="flex-1 overflow-x-auto p-6 bg-[#080808]">
-      <div className="flex gap-4 min-w-[1040px] h-[calc(100vh-210px)] items-start">
+    <div className="flex-1 overflow-x-auto p-6 bg-[#080808] flex flex-col">
+      {/* Error Alert Toast */}
+      {actionError && (
+        <div className="mb-4 px-4 py-2.5 rounded-lg bg-rose-950/80 border border-rose-800 text-rose-200 text-xs flex items-center justify-between shrink-0 shadow-lg animate-in fade-in">
+          <div className="flex items-center space-x-2">
+            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{actionError}</span>
+          </div>
+          <button onClick={() => setActionError(null)} className="text-rose-400 hover:text-white p-1">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Columns Container */}
+      <div className="flex gap-4 min-w-[1400px] h-[calc(100vh-230px)] items-start">
         {COLUMNS.map((col) => {
           const colTasks = tasks.filter((t) => t.status === col.id);
           const isOverWip = col.wipLimit && colTasks.length > col.wipLimit;
+          const isOver = dragOverCol === col.id;
 
           return (
             <div
               key={col.id}
-              onDragOver={handleDragOver}
+              onDragOver={(e) => handleDragOver(e, col.id)}
+              onDragLeave={handleDragLeave}
               onDrop={(e) => handleDrop(e, col.id)}
-              className="flex-1 min-w-[280px] max-w-[340px] bg-[#101010] border border-[#222222] rounded-xl flex flex-col max-h-full shadow-lg"
+              className={`flex-1 min-w-[260px] max-w-[320px] bg-[#101010] border rounded-xl flex flex-col max-h-full shadow-lg transition-colors ${
+                isOver ? 'border-neutral-400 bg-[#141414]' : 'border-[#222222]'
+              }`}
             >
               {/* Column Header */}
               <div className="p-3.5 border-b border-[#202020] flex items-center justify-between">
@@ -151,8 +199,14 @@ export function TaskKanban({
                 </div>
 
                 <button
-                  onClick={() => setAddingCol(addingCol === col.id ? null : col.id)}
-                  title="Quick add task"
+                  onClick={() => {
+                    if (onOpenCreateWithStatus) {
+                      onOpenCreateWithStatus(col.id);
+                    } else {
+                      setAddingCol(addingCol === col.id ? null : col.id);
+                    }
+                  }}
+                  title={`Add task in ${col.label}`}
                   className="p-1 rounded text-neutral-400 hover:text-white hover:bg-[#1f1f1f] transition-colors"
                 >
                   <Plus className="w-3.5 h-3.5" />
@@ -202,7 +256,7 @@ export function TaskKanban({
                     draggable
                     onDragStart={(e) => handleDragStart(e, t.id)}
                     onClick={() => onSelectTask(t.id)}
-                    className="p-3 rounded-lg bg-[#151515] hover:bg-[#1a1a1a] border border-[#242424] hover:border-[#383838] transition-all cursor-pointer shadow-sm group space-y-2.5"
+                    className="p-3 rounded-lg bg-[#151515] hover:bg-[#1a1a1a] border border-[#242424] hover:border-[#383838] transition-all cursor-pointer shadow-sm group space-y-2"
                   >
                     {/* Top Row: Task ID & Priority */}
                     <div className="flex items-center justify-between">
@@ -217,6 +271,28 @@ export function TaskKanban({
                       {t.title}
                     </p>
 
+                    {/* Labels */}
+                    {t.labels && t.labels.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {t.labels.map((l: any, idx: number) => {
+                          const labelObj = l.label || l;
+                          return (
+                            <span
+                              key={labelObj.id || idx}
+                              className="px-1.5 py-0.5 rounded text-[9px] font-medium border"
+                              style={{
+                                borderColor: (labelObj.color || '#737373') + '60',
+                                backgroundColor: (labelObj.color || '#737373') + '20',
+                                color: labelObj.color || '#a3a3a3',
+                              }}
+                            >
+                              {labelObj.name}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+
                     {/* Blocker alert tag if blocked */}
                     {t.isBlocked && (
                       <div className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-rose-950/40 text-rose-300 border border-rose-900/40 text-[10px] font-medium">
@@ -226,19 +302,32 @@ export function TaskKanban({
                     )}
 
                     {/* Bottom Meta Row */}
-                    <div className="flex items-center justify-between text-[11px] text-neutral-500 pt-1 border-t border-[#1e1e1e]">
-                      {t.project ? (
-                        <span className="flex items-center gap-1 text-neutral-400 truncate max-w-[120px]">
-                          <Folder className="w-3 h-3 text-neutral-500 shrink-0" />
-                          <span className="truncate">{t.project.name}</span>
-                        </span>
-                      ) : (
-                        <span />
-                      )}
+                    <div className="flex items-center justify-between text-[11px] text-neutral-500 pt-1.5 border-t border-[#1e1e1e]">
+                      {/* Assignee / Project */}
+                      <div className="flex items-center space-x-2 truncate max-w-[140px]">
+                        {t.assignee ? (
+                          <span className="flex items-center gap-1 text-[10px] text-neutral-300 bg-[#1c1c1c] border border-[#2e2e2e] px-1.5 py-0.5 rounded-full truncate" title={`Assigned to ${t.assignee.displayName}`}>
+                            <span className="w-3.5 h-3.5 rounded-full bg-neutral-700 flex items-center justify-center text-[9px] font-bold text-white uppercase shrink-0">
+                              {t.assignee.displayName.charAt(0)}
+                            </span>
+                            <span className="truncate max-w-[70px]">{t.assignee.displayName}</span>
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-neutral-600 italic">Unassigned</span>
+                        )}
 
+                        {t.project && (
+                          <span className="flex items-center gap-1 text-[10px] text-neutral-400 truncate max-w-[80px]" title={t.project.name}>
+                            <Folder className="w-3 h-3 text-neutral-500 shrink-0" />
+                            <span className="truncate">{t.project.name}</span>
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Right metadata: subtasks and due date */}
                       <div className="flex items-center space-x-2 shrink-0">
                         {t.subtaskProgress && t.subtaskProgress.total > 0 && (
-                          <span className="flex items-center gap-1 text-[10px] text-neutral-400">
+                          <span className="flex items-center gap-1 text-[10px] text-neutral-400" title={`${t.subtaskProgress.done}/${t.subtaskProgress.total} subtasks completed`}>
                             <CheckSquare className="w-3 h-3 text-neutral-500" />
                             {t.subtaskProgress.done}/{t.subtaskProgress.total}
                           </span>

@@ -45,7 +45,7 @@ export class NotificationsService {
   }
 
   async getUserNotifications(
-    workspaceId: string,
+    workspaceId: string | undefined,
     userId: string,
     options: { unreadOnly?: boolean; limit?: number; offset?: number } = {}
   ) {
@@ -53,12 +53,20 @@ export class NotificationsService {
     const offset = options.offset || 0;
 
     const where: any = {
-      workspaceId,
       recipientId: userId,
     };
 
+    if (workspaceId) {
+      where.workspaceId = workspaceId;
+    }
+
     if (options.unreadOnly) {
       where.isRead = false;
+    }
+
+    const unreadWhere: any = { recipientId: userId, isRead: false };
+    if (workspaceId) {
+      unreadWhere.workspaceId = workspaceId;
     }
 
     const [notifications, total, unreadCount] = await Promise.all([
@@ -74,9 +82,7 @@ export class NotificationsService {
         },
       }),
       prisma.notification.count({ where }),
-      prisma.notification.count({
-        where: { workspaceId, recipientId: userId, isRead: false },
-      }),
+      prisma.notification.count({ where: unreadWhere }),
     ]);
 
     return {

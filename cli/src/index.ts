@@ -7,7 +7,7 @@ import {
   saveLocalProjectConfig,
   removeLocalProjectConfig,
 } from './config';
-import { getLocalGitInfo, getGitInfo } from './git';
+import { getLocalGitInfo, getGitInfo, isGitInstalled } from './git';
 import { TerminalApp } from './tui/terminal-app';
 import { execSync } from 'child_process';
 
@@ -173,7 +173,6 @@ async function handleStatus() {
 
 async function handleConnect() {
   printHeader();
-  const git = getLocalGitInfo();
   const config = getGlobalConfig();
 
   if (!config.token) {
@@ -181,11 +180,30 @@ async function handleConnect() {
     process.exit(1);
   }
 
-  const repoNameIdx = args.indexOf('--repo');
+  if (!isGitInstalled()) {
+    console.error(`\n${red}Error:${reset} Git is not installed or not available in system PATH.`);
+    console.log(`  Please install Git (https://git-scm.com) to use Atlas repository integration.`);
+    process.exit(1);
+  }
+
+  const pathIdx = args.indexOf('--path') !== -1 ? args.indexOf('--path') : args.indexOf('--dir');
+  const customPath = pathIdx !== -1 && args[pathIdx + 1] ? args[pathIdx + 1] : undefined;
+
+  const git = getLocalGitInfo(customPath);
+  const repoNameIdx = args.indexOf('--repo') !== -1 ? args.indexOf('--repo') : args.indexOf('--name');
   const projectIdx = args.indexOf('--project');
+  const workspaceIdx = args.indexOf('--workspace');
+
+  if (!git.isGitRepo && repoNameIdx === -1) {
+    console.error(`\n${red}Error:${reset} Current directory is not a Git repository.`);
+    console.log(`  Run ${bold}git init${reset} first, or navigate to a Git project root.`);
+    console.log(`  To register an external repository by name, use: ${bold}atlas connect --name <name>${reset}`);
+    process.exit(1);
+  }
 
   const repoName = (repoNameIdx !== -1 ? args[repoNameIdx + 1] : undefined) || git.repoName || 'my-repository';
   const projectId = projectIdx !== -1 ? args[projectIdx + 1] : undefined;
+  const workspaceId = workspaceIdx !== -1 ? args[workspaceIdx + 1] : config.workspaceId;
 
   const client = new AtlasApiClient(config);
   console.log(`Connecting repository ${bold}"${repoName}"${reset} to Atlas...`);
@@ -194,8 +212,10 @@ async function handleConnect() {
     repoName,
     gitRemoteUrl: git.remoteUrl,
     currentBranch: git.currentBranch || 'main',
-    localPath: git.rootDir || process.cwd(),
+    localPath: customPath || git.rootDir || process.cwd(),
     projectId,
+    workspaceId,
+    latestCommit: git.latestCommitHash || git.latestCommit,
   });
 
   if (!res.success || !res.data) {
@@ -213,6 +233,9 @@ async function handleConnect() {
   console.log(`\n${green}✓ Repository connected successfully!${reset}`);
   console.log(`  Repository ID:   ${res.data.repository.id}`);
   console.log(`  Default Branch:  ${res.data.repository.defaultBranch}`);
+  if (git.latestCommit) {
+    console.log(`  Latest Commit:   ${git.latestCommit} (${git.latestCommitMessage || 'HEAD'})`);
+  }
   console.log(`  Project Config:  Saved to .atlas/project.json`);
   console.log(`\nNext: Run ${bold}atlas tasks${reset} to view work assigned to you.`);
 }

@@ -362,7 +362,7 @@ export function ShareModal({ isOpen, onClose, documentId, documentTitle }: Share
                 )}
               </div>
               <p className="text-xs text-[#737373] truncate max-w-sm">
-                {documentTitle || 'Document Workspace'}
+                {documentTitle || (accessData as any)?.title || 'Untitled Document'}
               </p>
             </div>
           </div>

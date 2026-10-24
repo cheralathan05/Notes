@@ -66,6 +66,14 @@ export default function DailyCommandCenterPage() {
     loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    const handleWsChange = () => {
+      loadData();
+    };
+    window.addEventListener('kronos:workspace-changed', handleWsChange);
+    return () => window.removeEventListener('kronos:workspace-changed', handleWsChange);
+  }, [loadData]);
+
   // Real-time task events listener to keep command center fresh
   useEffect(() => {
     const apiBase = API_BASE_URL;

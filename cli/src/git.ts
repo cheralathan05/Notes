@@ -7,13 +7,16 @@ export interface LocalGitInfo {
   repoName?: string;
   currentBranch?: string;
   latestCommit?: string;
+  latestCommitHash?: string;
+  latestCommitMessage?: string;
   remoteUrl?: string;
   changedFiles: string[];
 }
 
-function runGit(command: string): string | null {
+function runGit(command: string, cwd?: string): string | null {
   try {
     return execSync(`git ${command}`, {
+      cwd: cwd || process.cwd(),
       stdio: ['pipe', 'pipe', 'ignore'],
       encoding: 'utf-8',
     }).trim();
@@ -22,18 +25,21 @@ function runGit(command: string): string | null {
   }
 }
 
-export function getLocalGitInfo(): LocalGitInfo {
-  const rootDir = runGit('rev-parse --show-toplevel');
+export function getLocalGitInfo(customDir?: string): LocalGitInfo {
+  const cwd = customDir || process.cwd();
+  const rootDir = runGit('rev-parse --show-toplevel', cwd);
   if (!rootDir) {
     return { isGitRepo: false, changedFiles: [] };
   }
 
   const repoName = path.basename(rootDir);
-  const currentBranch = runGit('rev-parse --abbrev-ref HEAD') || 'main';
-  const latestCommit = runGit('rev-parse --short HEAD') || undefined;
-  const remoteUrl = runGit('config --get remote.origin.url') || undefined;
+  const currentBranch = runGit('rev-parse --abbrev-ref HEAD', cwd) || 'main';
+  const latestCommit = runGit('rev-parse --short HEAD', cwd) || undefined;
+  const latestCommitHash = runGit('rev-parse HEAD', cwd) || undefined;
+  const latestCommitMessage = runGit('log -1 --format=%s', cwd) || undefined;
+  const remoteUrl = runGit('config --get remote.origin.url', cwd) || undefined;
 
-  const rawStatus = runGit('status --porcelain') || '';
+  const rawStatus = runGit('status --porcelain', cwd) || '';
   const changedFiles = rawStatus
     ? rawStatus
         .split('\n')
@@ -47,9 +53,23 @@ export function getLocalGitInfo(): LocalGitInfo {
     repoName,
     currentBranch,
     latestCommit,
+    latestCommitHash,
+    latestCommitMessage,
     remoteUrl,
     changedFiles,
   };
+}
+
+export function isGitInstalled(): boolean {
+  try {
+    const res = execSync('git --version', {
+      stdio: ['pipe', 'pipe', 'ignore'],
+      encoding: 'utf-8',
+    });
+    return Boolean(res && res.includes('git version'));
+  } catch {
+    return false;
+  }
 }
 
 export const getGitInfo = getLocalGitInfo;

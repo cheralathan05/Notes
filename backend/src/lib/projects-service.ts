@@ -2,6 +2,14 @@ import { prisma } from './prisma';
 import { ProjectStatus, ProjectHealth, ProjectRole } from '@prisma/client';
 import { realtimeHub } from './realtime';
 
+export interface ProjectFilterOptions {
+  status?: ProjectStatus;
+  search?: string;
+  includeArchived?: boolean;
+  sortBy?: 'name' | 'progress' | 'targetDate' | 'createdAt' | 'updatedAt';
+  sortOrder?: 'asc' | 'desc';
+}
+
 export class ProjectsService {
   /**
    * Recalculates a project's completion percentage and health indicators.
@@ -76,15 +84,46 @@ export class ProjectsService {
   }
 
   /**
-   * List all projects for a workspace with stats
+   * List all projects for a workspace with stats, filters & sorting
    */
-  async listProjects(workspaceId: string, status?: ProjectStatus) {
+  async listProjects(
+    workspaceId: string,
+    optionsOrStatus?: ProjectStatus | ProjectFilterOptions
+  ) {
+    let options: ProjectFilterOptions = {};
+    if (typeof optionsOrStatus === 'string') {
+      options = { status: optionsOrStatus as ProjectStatus };
+    } else if (optionsOrStatus && typeof optionsOrStatus === 'object') {
+      options = optionsOrStatus;
+    }
+
+    const where: any = {
+      workspaceId,
+      isArchived: options.includeArchived ? undefined : false,
+    };
+
+    const validStatuses = ['PLANNING', 'ACTIVE', 'ON_HOLD', 'COMPLETED', 'ARCHIVED'];
+    if (options.status && typeof options.status === 'string') {
+      const upper = options.status.trim().toUpperCase();
+      if (validStatuses.includes(upper)) {
+        where.status = upper;
+      }
+    }
+
+    if (options.search) {
+      where.OR = [
+        { name: { contains: options.search, mode: 'insensitive' } },
+        { description: { contains: options.search, mode: 'insensitive' } },
+      ];
+    }
+
+    let orderBy: any = { createdAt: 'desc' };
+    if (options.sortBy) {
+      orderBy = { [options.sortBy]: options.sortOrder || 'desc' };
+    }
+
     const projects = await prisma.project.findMany({
-      where: {
-        workspaceId,
-        isArchived: false,
-        status: status || undefined,
-      },
+      where,
       include: {
         creator: { select: { id: true, displayName: true, email: true, avatarUrl: true } },
         members: {
@@ -95,14 +134,42 @@ export class ProjectsService {
         milestones: {
           orderBy: { dueDate: 'asc' },
         },
+        tasks: {
+          where: { isArchived: false, parentId: null },
+          select: { id: true, title: true, status: true, priority: true, dueDate: true },
+        },
         _count: {
           select: { tasks: true },
         },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy,
     });
 
     return projects;
+  }
+
+  async archiveProject(projectId: string, workspaceId: string) {
+    const updated = await prisma.project.update({
+      where: { id: projectId },
+      data: { isArchived: true, status: 'ARCHIVED' },
+      include: {
+        creator: { select: { id: true, displayName: true, email: true } },
+      },
+    });
+    realtimeHub.broadcast(workspaceId, 'PROJECT_UPDATED', { project: updated });
+    return updated;
+  }
+
+  async unarchiveProject(projectId: string, workspaceId: string) {
+    const updated = await prisma.project.update({
+      where: { id: projectId },
+      data: { isArchived: false, status: 'ACTIVE' },
+      include: {
+        creator: { select: { id: true, displayName: true, email: true } },
+      },
+    });
+    realtimeHub.broadcast(workspaceId, 'PROJECT_UPDATED', { project: updated });
+    return updated;
   }
 
   /**
@@ -289,6 +356,13 @@ export class ProjectsService {
       where: { id: milestoneId },
       data: updateData,
     });
+  }
+
+  async deleteMilestone(milestoneId: string) {
+    await prisma.milestone.delete({
+      where: { id: milestoneId },
+    });
+    return { success: true };
   }
 }
 

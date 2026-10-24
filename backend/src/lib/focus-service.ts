@@ -1,5 +1,4 @@
 import { prisma } from './prisma';
-import { FocusSessionStatus } from '@prisma/client';
 
 export class FocusService {
   async getActiveSession(workspaceId: string, userId: string) {
@@ -17,7 +16,24 @@ export class FocusService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return session;
+    if (!session) return null;
+
+    let currentElapsedSeconds = session.actualSeconds;
+    if (session.status === 'RUNNING') {
+      const runElapsed = Math.max(0, Math.floor((Date.now() - new Date(session.startedAt).getTime()) / 1000));
+      currentElapsedSeconds += runElapsed;
+    }
+
+    const targetSeconds = session.targetMinutes * 60;
+    const remainingSeconds = Math.max(0, targetSeconds - currentElapsedSeconds);
+    const isExpired = remainingSeconds <= 0;
+
+    return {
+      ...session,
+      currentElapsedSeconds,
+      remainingSeconds,
+      isExpired,
+    };
   }
 
   async startFocusSession(
@@ -27,13 +43,30 @@ export class FocusService {
       taskId?: string;
       title: string;
       targetMinutes?: number;
+      notes?: string;
     }
   ) {
-    // End any existing running session
-    const existing = await this.getActiveSession(workspaceId, userId);
+    if (data.taskId) {
+      const task = await prisma.task.findFirst({
+        where: { id: data.taskId, workspaceId },
+      });
+      if (!task) {
+        throw new Error('Task not found or does not belong to the active workspace');
+      }
+    }
+
+    // End any existing running or paused session safely
+    const existing = await prisma.focusSession.findFirst({
+      where: {
+        workspaceId,
+        userId,
+        status: { in: ['RUNNING', 'PAUSED'] },
+      },
+    });
+
     if (existing) {
       await this.completeFocusSession(existing.id, userId, {
-        notes: 'Auto-closed to start new session',
+        notes: existing.notes ? `${existing.notes} (Auto-closed)` : 'Auto-closed to start new session',
       });
     }
 
@@ -46,6 +79,9 @@ export class FocusService {
         targetMinutes: data.targetMinutes || 25,
         status: 'RUNNING',
         startedAt: new Date(),
+        actualSeconds: 0,
+        distractions: 0,
+        notes: data.notes || null,
       },
       include: {
         task: {
@@ -54,58 +90,136 @@ export class FocusService {
       },
     });
 
-    return session;
+    return {
+      ...session,
+      currentElapsedSeconds: 0,
+      remainingSeconds: (session.targetMinutes || 25) * 60,
+      isExpired: false,
+    };
   }
 
   async pauseFocusSession(sessionId: string, userId: string) {
     const session = await prisma.focusSession.findFirst({
       where: { id: sessionId, userId },
+      include: {
+        task: {
+          select: { id: true, title: true, priority: true, status: true },
+        },
+      },
     });
 
     if (!session) throw new Error('Focus session not found');
-    if (session.status !== 'RUNNING') return session;
 
-    // Calculate elapsed seconds so far
+    if (session.status === 'PAUSED') {
+      const remainingSeconds = Math.max(0, session.targetMinutes * 60 - session.actualSeconds);
+      return {
+        ...session,
+        currentElapsedSeconds: session.actualSeconds,
+        remainingSeconds,
+        isExpired: remainingSeconds <= 0,
+      };
+    }
+
+    if (session.status !== 'RUNNING') {
+      throw new Error(`Cannot pause session with status ${session.status}`);
+    }
+
     const now = Date.now();
     const elapsed = Math.floor((now - new Date(session.startedAt).getTime()) / 1000);
     const totalSeconds = session.actualSeconds + Math.max(0, elapsed);
 
-    return prisma.focusSession.update({
+    const updated = await prisma.focusSession.update({
       where: { id: sessionId },
       data: {
         status: 'PAUSED',
         actualSeconds: totalSeconds,
       },
+      include: {
+        task: {
+          select: { id: true, title: true, priority: true, status: true },
+        },
+      },
     });
+
+    const remainingSeconds = Math.max(0, updated.targetMinutes * 60 - totalSeconds);
+    return {
+      ...updated,
+      currentElapsedSeconds: totalSeconds,
+      remainingSeconds,
+      isExpired: remainingSeconds <= 0,
+    };
   }
 
   async resumeFocusSession(sessionId: string, userId: string) {
     const session = await prisma.focusSession.findFirst({
       where: { id: sessionId, userId },
+      include: {
+        task: {
+          select: { id: true, title: true, priority: true, status: true },
+        },
+      },
     });
 
     if (!session) throw new Error('Focus session not found');
-    if (session.status !== 'PAUSED') return session;
 
-    return prisma.focusSession.update({
+    if (session.status === 'RUNNING') {
+      const runElapsed = Math.max(0, Math.floor((Date.now() - new Date(session.startedAt).getTime()) / 1000));
+      const totalElapsed = session.actualSeconds + runElapsed;
+      const remainingSeconds = Math.max(0, session.targetMinutes * 60 - totalElapsed);
+      return {
+        ...session,
+        currentElapsedSeconds: totalElapsed,
+        remainingSeconds,
+        isExpired: remainingSeconds <= 0,
+      };
+    }
+
+    if (session.status !== 'PAUSED') {
+      throw new Error(`Cannot resume session with status ${session.status}`);
+    }
+
+    const updated = await prisma.focusSession.update({
       where: { id: sessionId },
       data: {
         status: 'RUNNING',
         startedAt: new Date(),
       },
+      include: {
+        task: {
+          select: { id: true, title: true, priority: true, status: true },
+        },
+      },
     });
+
+    const remainingSeconds = Math.max(0, updated.targetMinutes * 60 - updated.actualSeconds);
+    return {
+      ...updated,
+      currentElapsedSeconds: updated.actualSeconds,
+      remainingSeconds,
+      isExpired: remainingSeconds <= 0,
+    };
   }
 
   async completeFocusSession(
     sessionId: string,
     userId: string,
-    data: { notes?: string } = {}
+    data: { notes?: string; distractions?: number } = {}
   ) {
     const session = await prisma.focusSession.findFirst({
       where: { id: sessionId, userId },
+      include: {
+        task: {
+          select: { id: true, title: true, priority: true, status: true, actualHours: true },
+        },
+      },
     });
 
     if (!session) throw new Error('Focus session not found');
+
+    // Idempotency: If already completed, return existing session immediately to prevent duplicate TimeEntries
+    if (session.status === 'COMPLETED') {
+      return session;
+    }
 
     let totalSeconds = session.actualSeconds;
     if (session.status === 'RUNNING') {
@@ -115,51 +229,141 @@ export class FocusService {
     }
 
     const completedAt = new Date();
+    const finalSeconds = Math.max(1, totalSeconds);
 
     const [updatedSession] = await prisma.$transaction([
       prisma.focusSession.update({
         where: { id: sessionId },
         data: {
           status: 'COMPLETED',
-          actualSeconds: totalSeconds,
+          actualSeconds: finalSeconds,
           endedAt: completedAt,
-          notes: data.notes || session.notes,
+          notes: data.notes !== undefined ? data.notes : session.notes,
+          distractions: data.distractions !== undefined ? data.distractions : session.distractions,
+        },
+        include: {
+          task: {
+            select: { id: true, title: true, priority: true, status: true },
+          },
         },
       }),
-      // Create a persistent TimeEntry record if duration is >= 60 seconds
-      ...(totalSeconds >= 60
-        ? [
-            prisma.timeEntry.create({
-              data: {
-                workspaceId: session.workspaceId,
-                userId,
-                taskId: session.taskId,
-                durationSeconds: totalSeconds,
-                startedAt: session.startedAt,
-                endedAt: completedAt,
-                description: `Focus Session: ${session.title}`,
-                isManual: false,
-              },
-            }),
-          ]
-        : []),
+      prisma.timeEntry.create({
+        data: {
+          workspaceId: session.workspaceId,
+          userId,
+          taskId: session.taskId,
+          durationSeconds: finalSeconds,
+          startedAt: session.startedAt,
+          endedAt: completedAt,
+          description: `Focus Session: ${session.title}`,
+          isManual: false,
+        },
+      }),
     ]);
 
     // If session was linked to task, update actualHours on Task
-    if (session.taskId && totalSeconds >= 60) {
+    if (session.taskId) {
       const task = await prisma.task.findUnique({ where: { id: session.taskId } });
       if (task) {
-        const addedHours = totalSeconds / 3600;
+        const addedHours = Math.max(0.01, Number((finalSeconds / 3600).toFixed(4)));
         await prisma.task.update({
           where: { id: session.taskId },
           data: {
-            actualHours: (task.actualHours || 0) + addedHours,
+            actualHours: Number(((task.actualHours || 0) + addedHours).toFixed(2)),
           },
         });
       }
     }
 
     return updatedSession;
+  }
+
+  async cancelFocusSession(sessionId: string, userId: string) {
+    const session = await prisma.focusSession.findFirst({
+      where: { id: sessionId, userId },
+      include: {
+        task: {
+          select: { id: true, title: true, priority: true, status: true },
+        },
+      },
+    });
+
+    if (!session) throw new Error('Focus session not found');
+    if (session.status === 'CANCELLED') return session;
+    if (session.status === 'COMPLETED') {
+      throw new Error('Cannot cancel a completed session');
+    }
+
+    let totalSeconds = session.actualSeconds;
+    if (session.status === 'RUNNING') {
+      const now = Date.now();
+      const elapsed = Math.floor((now - new Date(session.startedAt).getTime()) / 1000);
+      totalSeconds += Math.max(0, elapsed);
+    }
+
+    return prisma.focusSession.update({
+      where: { id: sessionId },
+      data: {
+        status: 'CANCELLED',
+        actualSeconds: totalSeconds,
+        endedAt: new Date(),
+      },
+      include: {
+        task: {
+          select: { id: true, title: true, priority: true, status: true },
+        },
+      },
+    });
+  }
+
+  async recordDistraction(sessionId: string, userId: string, data: { note?: string } = {}) {
+    const session = await prisma.focusSession.findFirst({
+      where: { id: sessionId, userId },
+    });
+
+    if (!session) throw new Error('Focus session not found');
+
+    const updatedNote = data.note
+      ? (session.distractionNotes ? `${session.distractionNotes}\n• ${data.note}` : `• ${data.note}`)
+      : session.distractionNotes;
+
+    return prisma.focusSession.update({
+      where: { id: sessionId },
+      data: {
+        distractions: session.distractions + 1,
+        distractionNotes: updatedNote,
+      },
+      include: {
+        task: {
+          select: { id: true, title: true, priority: true, status: true },
+        },
+      },
+    });
+  }
+
+  async getSessionHistory(
+    workspaceId: string,
+    userId: string,
+    options: { limit?: number; taskId?: string } = {}
+  ) {
+    const where: any = {
+      workspaceId,
+      userId,
+    };
+    if (options.taskId) where.taskId = options.taskId;
+
+    const sessions = await prisma.focusSession.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        task: {
+          select: { id: true, title: true, priority: true, status: true },
+        },
+      },
+      take: options.limit || 20,
+    });
+
+    return sessions;
   }
 
   async createManualTimeEntry(
@@ -236,11 +440,30 @@ export class FocusService {
     const distanceToMonday = (dayOfWeek + 6) % 7;
     const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - distanceToMonday);
 
-    const [todayEntries, weekEntries] = await Promise.all([
+    const [todaySessions, weekSessions, todayManualEntries, weekManualEntries] = await Promise.all([
+      prisma.focusSession.findMany({
+        where: {
+          workspaceId,
+          userId,
+          status: 'COMPLETED',
+          startedAt: { gte: startOfToday },
+        },
+        select: { actualSeconds: true },
+      }),
+      prisma.focusSession.findMany({
+        where: {
+          workspaceId,
+          userId,
+          status: 'COMPLETED',
+          startedAt: { gte: startOfWeek },
+        },
+        select: { actualSeconds: true },
+      }),
       prisma.timeEntry.findMany({
         where: {
           workspaceId,
           userId,
+          isManual: true,
           startedAt: { gte: startOfToday },
         },
         select: { durationSeconds: true },
@@ -249,20 +472,28 @@ export class FocusService {
         where: {
           workspaceId,
           userId,
+          isManual: true,
           startedAt: { gte: startOfWeek },
         },
         select: { durationSeconds: true },
       }),
     ]);
 
-    const todaySeconds = todayEntries.reduce((sum, e) => sum + e.durationSeconds, 0);
-    const weekSeconds = weekEntries.reduce((sum, e) => sum + e.durationSeconds, 0);
+    const todaySessionSecs = todaySessions.reduce((sum, s) => sum + s.actualSeconds, 0);
+    const todayManualSecs = todayManualEntries.reduce((sum, e) => sum + e.durationSeconds, 0);
+    const todayTotalSecs = todaySessionSecs + todayManualSecs;
+
+    const weekSessionSecs = weekSessions.reduce((sum, s) => sum + s.actualSeconds, 0);
+    const weekManualSecs = weekManualEntries.reduce((sum, e) => sum + e.durationSeconds, 0);
+    const weekTotalSecs = weekSessionSecs + weekManualSecs;
 
     return {
-      todayMinutes: Math.round(todaySeconds / 60),
-      todayHours: Number((todaySeconds / 3600).toFixed(1)),
-      weekMinutes: Math.round(weekSeconds / 60),
-      weekHours: Number((weekSeconds / 3600).toFixed(1)),
+      todayMinutes: Math.round(todayTotalSecs / 60),
+      todayHours: Number((todayTotalSecs / 3600).toFixed(1)),
+      weekMinutes: Math.round(weekTotalSecs / 60),
+      weekHours: Number((weekTotalSecs / 3600).toFixed(1)),
+      completedCountToday: todaySessions.length,
+      completedCountWeek: weekSessions.length,
     };
   }
 }

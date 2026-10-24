@@ -244,11 +244,27 @@ export function buildDocumentInvitationEmail(
   inviterName: string,
   documentTitle: string,
   role: string,
+  recipientEmail?: string,
   message?: string
 ): Omit<EmailMessage, 'to'> {
+  const safeTitle = documentTitle && documentTitle.trim() ? documentTitle.trim() : 'Untitled Document';
+  const roleDescription =
+    role === 'EDITOR'
+      ? 'view and edit content, manage comments, and create revisions'
+      : role === 'COMMENTER'
+      ? 'view content and add comments and feedback'
+      : 'view the document in read-only mode';
+
   const html = wrapHtml(`
-    <h1>Collaborator Authorization Invitation</h1>
-    <p><strong>${inviterName}</strong> has invited you to collaborate on the sovereign workspace document <strong>${documentTitle}</strong> with <strong>${role}</strong> access.</p>
+    <h1>Collaboration Invitation</h1>
+    <p><strong>${inviterName}</strong> has invited you to collaborate on the document <strong>${safeTitle}</strong> with <strong>${role}</strong> permissions.</p>
+    ${
+      recipientEmail
+        ? `<div style="background: #141414; border: 1px solid #282828; padding: 10px 14px; margin: 16px 0; font-size: 12px; font-family: monospace; color: #D4D4D4;">
+            <span style="color: #737373;">Designated Recipient:</span> ${recipientEmail}
+          </div>`
+        : ''
+    }
     ${
       message
         ? `<blockquote style="border-left: 2px solid #555; padding-left: 12px; margin: 16px 0; color: #A3A3A3; font-style: italic;">"${message}"</blockquote>`
@@ -257,6 +273,40 @@ export function buildDocumentInvitationEmail(
     <p style="text-align: center; margin: 28px 0;">
       <a href="${inviteUrl}" class="btn">Accept Invitation & Open Document</a>
     </p>
+    <p style="font-size: 13px; color: #A3A3A3; line-height: 1.5;">
+      <strong>What happens after acceptance:</strong> You will be granted immediate ${role} access to "${safeTitle}". As a ${role}, you can ${roleDescription}.
+    </p>
+    <p style="font-size: 12px; color: #737373;">This single-use cryptographic invitation link expires in 7 days. If you do not have an active session, sign in or register with your invited email address to claim access.</p>
+    <div class="footer">
+      <p>Direct URL: <span class="code">${inviteUrl}</span></p>
+    </div>
+  `);
+
+  return {
+    subject: `[${APP_NAME}] ${inviterName} invited you to "${safeTitle}" (${role})`,
+    html,
+    text: `${inviterName} invited you to collaborate on "${safeTitle}" with ${role} access on ${APP_NAME}.\n\nDesignated Recipient: ${recipientEmail || 'You'}\nPermissions: ${role} (${roleDescription})\n\nAccept Link: ${inviteUrl}\n\nThis invitation expires in 7 days.`,
+  };
+}
+
+export function buildWorkspaceInvitationEmail(
+  inviteUrl: string,
+  inviterName: string,
+  workspaceName: string,
+  role: string,
+  message?: string
+): Omit<EmailMessage, 'to'> {
+  const html = wrapHtml(`
+    <h1>Workspace Collaboration Invitation</h1>
+    <p><strong>${inviterName}</strong> has invited you to join the sovereign workspace <strong>${workspaceName}</strong> as a <strong>${role}</strong>.</p>
+    ${
+      message
+        ? `<blockquote style="border-left: 2px solid #555; padding-left: 12px; margin: 16px 0; color: #A3A3A3; font-style: italic;">"${message}"</blockquote>`
+        : ''
+    }
+    <p style="text-align: center; margin: 28px 0;">
+      <a href="${inviteUrl}" class="btn">Accept Workspace Invitation</a>
+    </p>
     <p style="font-size: 12px; color: #737373;">This single-use cryptographic invitation link expires in 7 days. If you do not have an active session, you will be prompted to authenticate with this invited email address.</p>
     <div class="footer">
       <p>Direct URL: <span class="code">${inviteUrl}</span></p>
@@ -264,9 +314,9 @@ export function buildDocumentInvitationEmail(
   `);
 
   return {
-    subject: `[${APP_NAME}] ${inviterName} invited you to "${documentTitle}" (${role})`,
+    subject: `[${APP_NAME}] ${inviterName} invited you to join "${workspaceName}" (${role})`,
     html,
-    text: `${inviterName} invited you to collaborate on "${documentTitle}" with ${role} access on ${APP_NAME}.\n\nAccept Link: ${inviteUrl}\n\nThis invitation expires in 7 days.`,
+    text: `${inviterName} invited you to join workspace "${workspaceName}" with ${role} permissions on ${APP_NAME}.\n\nAccept Link: ${inviteUrl}\n\nThis invitation expires in 7 days.`,
   };
 }
 

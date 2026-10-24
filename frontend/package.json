@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start",
+    "start:local": "next start -p 3001",
     "lint": "eslint"
   },
   "dependencies": {
@@ -26,7 +27,7 @@
     "@tiptap/starter-kit": "^3.32.0",
     "lowlight": "^3.3.0",
     "lucide-react": "^1.56.0",
-    "next": "16.4.0",
+    "next": "^16.4.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "zod": "^4.6.7"

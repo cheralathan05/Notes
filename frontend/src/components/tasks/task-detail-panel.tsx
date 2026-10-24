@@ -43,6 +43,7 @@ interface TaskDetailPanelProps {
   onClose: () => void;
   onTaskUpdated: () => void;
   projects?: ProjectItem[];
+  members?: Array<{ id: string; userId: string; user: { id: string; displayName: string; email: string; avatarUrl?: string | null } }>;
 }
 
 export function TaskDetailPanel({
@@ -50,10 +51,21 @@ export function TaskDetailPanel({
   onClose,
   onTaskUpdated,
   projects = [],
+  members = [],
 }: TaskDetailPanelProps) {
+  const [currentId, setCurrentId] = useState<string | null>(taskId);
   const [task, setTask] = useState<TaskItem | null>(null);
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'details' | 'criteria' | 'evidence' | 'subtasks' | 'comments'>('details');
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'details' | 'criteria' | 'evidence' | 'subtasks' | 'comments' | 'activity'>('details');
+
+  // Workspace members & labels
+  const [workspaceMembers, setWorkspaceMembers] = useState(members);
+  const [workspaceLabels, setWorkspaceLabels] = useState<Array<{ id: string; name: string; color: string }>>([]);
+  const [isAddingLabel, setIsAddingLabel] = useState(false);
+  const [selectedLabelId, setSelectedLabelId] = useState('');
+  const [customLabelName, setCustomLabelName] = useState('');
+  const [customLabelColor, setCustomLabelColor] = useState('#737373');
 
   // Atlas Developer Workspace states
   const [evidenceList, setEvidenceList] = useState<TaskEvidenceItem[]>([]);
@@ -70,20 +82,50 @@ export function TaskDetailPanel({
   const [dependencyError, setDependencyError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!taskId) {
+    setCurrentId(taskId);
+  }, [taskId]);
+
+  useEffect(() => {
+    if (members && members.length > 0) {
+      setWorkspaceMembers(members);
+    } else {
+      api.listWorkspaceMembers().then((res) => {
+        if (res.success && res.data?.members) {
+          setWorkspaceMembers(res.data.members);
+        }
+      }).catch(() => {});
+    }
+
+    loadLabels();
+  }, [members]);
+
+  const loadLabels = async () => {
+    try {
+      const res = await api.getTaskLabels();
+      if (res.success && res.data?.labels) {
+        setWorkspaceLabels(res.data.labels);
+      }
+    } catch {
+      // Non-blocking
+    }
+  };
+
+  useEffect(() => {
+    if (!currentId) {
       setTask(null);
       return;
     }
 
     loadTask();
     loadEvidence();
-  }, [taskId]);
+  }, [currentId]);
 
   const loadTask = async () => {
-    if (!taskId) return;
+    if (!currentId) return;
     setLoading(true);
+    setStatusError(null);
     try {
-      const res = await api.getTask(taskId);
+      const res = await api.getTask(currentId);
       if (res.success && res.data?.task) {
         setTask(res.data.task);
       }
@@ -95,9 +137,9 @@ export function TaskDetailPanel({
   };
 
   const loadEvidence = async () => {
-    if (!taskId) return;
+    if (!currentId) return;
     try {
-      const res = await api.getTaskEvidence(taskId);
+      const res = await api.getTaskEvidence(currentId);
       if (res.success && res.data?.evidence) {
         setEvidenceList(res.data.evidence);
       }
@@ -182,14 +224,20 @@ export function TaskDetailPanel({
 
   const handleStatusChange = async (status: TaskStatusType) => {
     if (!task) return;
+    setStatusError(null);
     try {
       const res = await api.updateTask(task.id, { status });
       if (res.success && res.data?.task) {
-        setTask((prev) => (prev ? { ...prev, status } : null));
+        setTask(res.data.task);
         onTaskUpdated();
+      } else {
+        setStatusError(res.error?.message || 'Failed to update status');
+        await loadTask();
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to update status:', err);
+      setStatusError(err.message || 'Failed to update status');
+      await loadTask();
     }
   };
 
@@ -233,10 +281,125 @@ export function TaskDetailPanel({
     }
   };
 
+  const handleAssigneeChange = async (userId: string) => {
+    if (!task) return;
+    setStatusError(null);
+    try {
+      const aId = userId === 'none' ? null : userId;
+      const res = await api.updateTask(task.id, { assigneeId: aId });
+      if (res.success && res.data?.task) {
+        setTask(res.data.task);
+        onTaskUpdated();
+      } else {
+        setStatusError(res.error?.message || 'Failed to update assignee');
+      }
+    } catch (err: any) {
+      console.error('Failed to update assignee:', err);
+      setStatusError(err.message || 'Failed to update assignee');
+    }
+  };
+
+  const handleStartDateChange = async (dateStr: string) => {
+    if (!task) return;
+    try {
+      const res = await api.updateTask(task.id, { startDate: dateStr || null });
+      if (res.success && res.data?.task) {
+        setTask(res.data.task);
+        onTaskUpdated();
+      }
+    } catch (err) {
+      console.error('Failed to update start date:', err);
+    }
+  };
+
+  const handleEstimatedHoursChange = async (hoursStr: string) => {
+    if (!task) return;
+    const hours = hoursStr ? parseFloat(hoursStr) : null;
+    try {
+      const res = await api.updateTask(task.id, { estimatedHours: hours });
+      if (res.success && res.data?.task) {
+        setTask(res.data.task);
+        onTaskUpdated();
+      }
+    } catch (err) {
+      console.error('Failed to update estimated hours:', err);
+    }
+  };
+
+  const handleActualHoursChange = async (hoursStr: string) => {
+    if (!task) return;
+    const hours = hoursStr ? parseFloat(hoursStr) : null;
+    try {
+      const res = await api.updateTask(task.id, { actualHours: hours });
+      if (res.success && res.data?.task) {
+        setTask(res.data.task);
+        onTaskUpdated();
+      }
+    } catch (err) {
+      console.error('Failed to update actual hours:', err);
+    }
+  };
+
+  const handleAttachLabel = async (labelId?: string, name?: string, color?: string) => {
+    if (!task) return;
+    try {
+      await api.addTaskLabel(task.id, { labelId, name, color });
+      setSelectedLabelId('');
+      setCustomLabelName('');
+      setIsAddingLabel(false);
+      await loadTask();
+      await loadLabels();
+      onTaskUpdated();
+    } catch (err) {
+      console.error('Failed to attach label:', err);
+    }
+  };
+
+  const handleRemoveLabel = async (labelId: string) => {
+    if (!task) return;
+    try {
+      await api.removeTaskLabel(task.id, labelId);
+      await loadTask();
+      onTaskUpdated();
+    } catch (err) {
+      console.error('Failed to remove label:', err);
+    }
+  };
+
+  const handleToggleSubtask = async (subtaskId: string, currentStatus: string) => {
+    setStatusError(null);
+    try {
+      const nextStatus = currentStatus === 'DONE' ? 'TODO' : 'DONE';
+      const res = await api.updateTask(subtaskId, { status: nextStatus });
+      if (res.success) {
+        await loadTask();
+        onTaskUpdated();
+      } else {
+        setStatusError(res.error?.message || 'Failed to toggle subtask status');
+      }
+    } catch (err: any) {
+      setStatusError(err.message || 'Failed to toggle subtask status');
+    }
+  };
+
+  const handleDeleteSubtask = async (subtaskId: string, subtaskTitle: string) => {
+    if (!confirm(`Delete subtask "${subtaskTitle}"?`)) return;
+    try {
+      const res = await api.deleteTask(subtaskId);
+      if (res.success) {
+        await loadTask();
+        onTaskUpdated();
+      }
+    } catch (err) {
+      console.error('Failed to delete subtask:', err);
+    }
+  };
+
   const handleAddSubtask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!task || !newSubtaskTitle.trim()) return;
     setIsSubmitting(true);
+    setStatusError(null);
     try {
       const res = await api.createTask({
         title: newSubtaskTitle.trim(),
@@ -247,7 +410,11 @@ export function TaskDetailPanel({
         setNewSubtaskTitle('');
         await loadTask();
         onTaskUpdated();
+      } else {
+        setStatusError(res.error?.message || 'Failed to create subtask');
       }
+    } catch (err: any) {
+      setStatusError(err.message || 'Failed to create subtask');
     } finally {
       setIsSubmitting(false);
     }
@@ -343,8 +510,11 @@ export function TaskDetailPanel({
       {/* Top Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-[#222222] bg-[#121212]">
         <div className="flex items-center space-x-2">
-          <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-[#1C1C1C] text-neutral-400 border border-[#2A2A2A]">
-            TASK-{taskId.slice(0, 8)}
+          <span
+            className="text-[11px] font-mono px-2 py-0.5 rounded bg-[#1C1C1C] text-neutral-400 border border-[#2A2A2A]"
+            title={`Canonical ID: ${task?.id || currentId || ''}`}
+          >
+            TASK-{((currentId || taskId || '').slice(0, 8))}
           </span>
           {task?.project && (
             <span className="text-xs text-neutral-400 flex items-center gap-1">
@@ -377,6 +547,42 @@ export function TaskDetailPanel({
         </div>
       ) : task ? (
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {/* Status Mutation Error Banner */}
+          {statusError && (
+            <div className="p-3 rounded-lg bg-rose-950/40 border border-rose-800/60 text-rose-200 text-xs flex items-start justify-between space-x-2.5">
+              <div className="flex items-start space-x-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 mt-0.5 shrink-0" />
+                <span className="leading-snug">{statusError}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStatusError(null)}
+                className="text-rose-400 hover:text-white shrink-0 p-0.5"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* Parent Task Banner if this task is a child */}
+          {task.parent && (
+            <div className="p-2.5 rounded bg-[#141414] border border-[#2a2a2a] flex items-center justify-between text-xs">
+              <div className="flex items-center space-x-2 truncate">
+                <GitBranch className="w-3.5 h-3.5 text-neutral-400 shrink-0" />
+                <span className="text-neutral-500 shrink-0">Subtask of:</span>
+                <span className="font-semibold text-neutral-200 truncate">{task.parent.title}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCurrentId(task.parent!.id)}
+                className="text-[11px] font-mono text-cyan-400 hover:text-cyan-300 ml-2 shrink-0 flex items-center gap-1"
+              >
+                <span>View Parent</span>
+                <ArrowRight className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+
           {/* Active Blocker Alert Banner */}
           {task.isBlocked && (
             <div className="p-3 rounded-lg bg-rose-950/20 border border-rose-900/40 text-rose-300 text-xs flex items-start space-x-2.5">
@@ -384,14 +590,20 @@ export function TaskDetailPanel({
               <div>
                 <p className="font-semibold text-rose-200">Task is currently blocked</p>
                 <p className="text-[11px] text-rose-400 mt-0.5">
-                  Cannot proceed until blocking predecessor tasks are marked DONE:
+                  Cannot proceed or complete until blocking predecessor tasks are marked DONE:
                 </p>
                 <ul className="mt-1.5 space-y-1">
                   {task.blockers?.map((b) => (
                     <li key={b.id} className="font-mono text-[11px] flex items-center gap-1.5 text-rose-200">
                       <span>•</span>
                       <span>[{b.status}]</span>
-                      <span className="font-sans font-medium text-white">{b.title}</span>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentId(b.id)}
+                        className="font-sans font-medium text-white hover:underline text-left"
+                      >
+                        {b.title}
+                      </button>
                       {b.assignee && <span className="text-rose-400">({b.assignee.displayName})</span>}
                     </li>
                   ))}
@@ -409,7 +621,7 @@ export function TaskDetailPanel({
           </div>
 
           {/* Quick Properties Grid */}
-          <div className="grid grid-cols-2 gap-3 p-3.5 rounded-lg bg-[#141414] border border-[#222222] text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3.5 rounded-lg bg-[#141414] border border-[#222222] text-xs">
             {/* Status */}
             <div>
               <label className="text-[10px] uppercase font-bold tracking-wider text-neutral-500 block mb-1">
@@ -447,6 +659,25 @@ export function TaskDetailPanel({
               </select>
             </div>
 
+            {/* Assignee */}
+            <div>
+              <label className="text-[10px] uppercase font-bold tracking-wider text-neutral-500 block mb-1">
+                Assignee
+              </label>
+              <select
+                value={task.assigneeId || 'none'}
+                onChange={(e) => handleAssigneeChange(e.target.value)}
+                className="w-full bg-[#1e1e1e] border border-[#2e2e2e] text-neutral-200 text-xs rounded px-2.5 py-1.5 focus:outline-none focus:border-neutral-500"
+              >
+                <option value="none">Unassigned</option>
+                {workspaceMembers.map((m) => (
+                  <option key={m.userId} value={m.userId}>
+                    {m.user?.displayName || m.userId}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             {/* Project */}
             <div>
               <label className="text-[10px] uppercase font-bold tracking-wider text-neutral-500 block mb-1">
@@ -466,6 +697,19 @@ export function TaskDetailPanel({
               </select>
             </div>
 
+            {/* Start Date */}
+            <div>
+              <label className="text-[10px] uppercase font-bold tracking-wider text-neutral-500 block mb-1">
+                Start Date
+              </label>
+              <input
+                type="date"
+                value={task.startDate ? task.startDate.split('T')[0] : ''}
+                onChange={(e) => handleStartDateChange(e.target.value)}
+                className="w-full bg-[#1e1e1e] border border-[#2e2e2e] text-neutral-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:border-neutral-500"
+              />
+            </div>
+
             {/* Due Date */}
             <div>
               <label className="text-[10px] uppercase font-bold tracking-wider text-neutral-500 block mb-1">
@@ -478,6 +722,154 @@ export function TaskDetailPanel({
                 className="w-full bg-[#1e1e1e] border border-[#2e2e2e] text-neutral-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:border-neutral-500"
               />
             </div>
+
+            {/* Estimated Hours */}
+            <div>
+              <label className="text-[10px] uppercase font-bold tracking-wider text-neutral-500 block mb-1">
+                Est. Hours
+              </label>
+              <input
+                type="number"
+                step="0.5"
+                min="0"
+                placeholder="e.g. 4.0"
+                value={task.estimatedHours !== null && task.estimatedHours !== undefined ? task.estimatedHours : ''}
+                onChange={(e) => handleEstimatedHoursChange(e.target.value)}
+                className="w-full bg-[#1e1e1e] border border-[#2e2e2e] text-neutral-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:border-neutral-500"
+              />
+            </div>
+
+            {/* Actual Hours */}
+            <div>
+              <label className="text-[10px] uppercase font-bold tracking-wider text-neutral-500 block mb-1">
+                Actual Hours
+              </label>
+              <input
+                type="number"
+                step="0.5"
+                min="0"
+                placeholder="e.g. 3.5"
+                value={task.actualHours !== null && task.actualHours !== undefined ? task.actualHours : ''}
+                onChange={(e) => handleActualHoursChange(e.target.value)}
+                className="w-full bg-[#1e1e1e] border border-[#2e2e2e] text-neutral-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:border-neutral-500"
+              />
+            </div>
+          </div>
+
+          {/* Labels & Tags Management */}
+          <div className="p-3 rounded-lg bg-[#141414] border border-[#222222] text-xs space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] uppercase font-bold tracking-wider text-neutral-500">
+                Labels & Tags
+              </label>
+              <button
+                type="button"
+                onClick={() => setIsAddingLabel(!isAddingLabel)}
+                className="text-[11px] text-neutral-400 hover:text-white flex items-center gap-1 font-medium"
+              >
+                <Plus className="w-3 h-3" />
+                <span>{isAddingLabel ? 'Cancel' : 'Add Label'}</span>
+              </button>
+            </div>
+
+            {/* Current Labels */}
+            <div className="flex flex-wrap gap-1.5 items-center">
+              {task.labels && task.labels.length > 0 ? (
+                task.labels.map((l: any, idx: number) => {
+                  const labelObj = l.label || l;
+                  return (
+                    <span
+                      key={labelObj.id || idx}
+                      className="px-2 py-0.5 rounded text-[10px] font-medium border flex items-center gap-1.5"
+                      style={{
+                        borderColor: (labelObj.color || '#737373') + '60',
+                        backgroundColor: (labelObj.color || '#737373') + '20',
+                        color: labelObj.color || '#a3a3a3',
+                      }}
+                    >
+                      <span>{labelObj.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveLabel(labelObj.id)}
+                        className="hover:text-white"
+                        title="Remove label"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </span>
+                  );
+                })
+              ) : (
+                <span className="text-[11px] text-neutral-600 italic">No labels attached</span>
+              )}
+            </div>
+
+            {/* Add Label Inline Dropdown / Form */}
+            {isAddingLabel && (
+              <div className="pt-2 border-t border-[#222222] flex flex-wrap items-center gap-2">
+                {workspaceLabels.length > 0 && (
+                  <select
+                    value={selectedLabelId}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        handleAttachLabel(e.target.value);
+                      }
+                    }}
+                    className="bg-[#1e1e1e] border border-[#2e2e2e] text-xs text-neutral-200 rounded px-2.5 py-1 focus:outline-none focus:border-neutral-500"
+                  >
+                    <option value="">Choose existing label...</option>
+                    {workspaceLabels.map((lbl) => (
+                      <option key={lbl.id} value={lbl.id}>
+                        {lbl.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+
+                <span className="text-neutral-500 text-[10px]">or create:</span>
+                <input
+                  type="text"
+                  placeholder="New label name..."
+                  value={customLabelName}
+                  onChange={(e) => setCustomLabelName(e.target.value)}
+                  className="bg-[#1e1e1e] border border-[#2e2e2e] text-xs text-white rounded px-2 py-1 w-32 focus:outline-none focus:border-neutral-500 placeholder:text-neutral-600"
+                />
+                <input
+                  type="color"
+                  value={customLabelColor}
+                  onChange={(e) => setCustomLabelColor(e.target.value)}
+                  className="w-6 h-6 rounded border border-neutral-700 bg-transparent cursor-pointer p-0"
+                  title="Pick color"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (customLabelName.trim()) {
+                      handleAttachLabel(undefined, customLabelName.trim(), customLabelColor);
+                    }
+                  }}
+                  disabled={!customLabelName.trim()}
+                  className="px-2 py-1 bg-neutral-200 text-black text-[11px] font-semibold rounded hover:bg-white disabled:opacity-40"
+                >
+                  Save
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Reporter & Audit Info Header */}
+          <div className="text-[11px] text-neutral-500 flex flex-wrap items-center gap-x-4 gap-y-1 px-1">
+            <span>
+              Reporter: <strong className="text-neutral-400 font-medium">{task.creator?.displayName || task.creator?.email || 'System'}</strong>
+            </span>
+            <span>
+              Created: <span className="text-neutral-400">{new Date(task.createdAt).toLocaleDateString()}</span>
+            </span>
+            {task.completedAt && (
+              <span className="text-emerald-400">
+                Completed: {new Date(task.completedAt).toLocaleDateString()}
+              </span>
+            )}
           </div>
 
           {/* Atlas Developer Workspace Status & Claim Lease */}
@@ -625,6 +1017,17 @@ export function TaskDetailPanel({
               <MessageSquare className="w-3.5 h-3.5" />
               Discussion ({task.comments?.length || 0})
             </button>
+            <button
+              onClick={() => setActiveTab('activity')}
+              className={`pb-2.5 px-3 font-medium transition-colors border-b-2 flex items-center gap-1.5 whitespace-nowrap ${
+                activeTab === 'activity'
+                  ? 'border-white text-white'
+                  : 'border-transparent text-neutral-500 hover:text-neutral-300'
+              }`}
+            >
+              <History className="w-3.5 h-3.5" />
+              Activity ({task.activities?.length || 0})
+            </button>
           </div>
 
           {/* TAB 1: Checklist & Dependencies */}
@@ -696,14 +1099,21 @@ export function TaskDetailPanel({
                         key={b.id}
                         className="flex items-center justify-between p-2 rounded bg-[#171717] border border-[#262626] text-xs"
                       >
-                        <div className="flex items-center space-x-2">
-                          <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-                          <span className="text-neutral-300 font-medium">{b.title}</span>
-                          <span className="text-[10px] text-neutral-500">[{b.status}]</span>
+                        <div className="flex items-center space-x-2 min-w-0 flex-1">
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                          <button
+                            type="button"
+                            onClick={() => setCurrentId(b.id)}
+                            className="text-neutral-300 font-medium hover:underline hover:text-white truncate text-left"
+                            title="Open blocker task"
+                          >
+                            {b.title}
+                          </button>
+                          <span className="text-[10px] text-neutral-500 shrink-0">[{b.status}]</span>
                         </div>
                         <button
                           onClick={() => handleRemoveDependency(b.id)}
-                          className="text-[10px] text-neutral-500 hover:text-rose-400"
+                          className="text-[10px] text-neutral-500 hover:text-rose-400 shrink-0 ml-2"
                         >
                           Remove
                         </button>
@@ -901,23 +1311,84 @@ export function TaskDetailPanel({
           {/* TAB 2: Subtasks */}
           {activeTab === 'subtasks' && (
             <div className="space-y-4">
+              {/* Subtasks Progress Header */}
+              {task.subtasks && task.subtasks.length > 0 && (
+                <div className="p-3 rounded-lg bg-[#141414] border border-[#222222] space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-neutral-300">Subtask Completion</span>
+                    <span className="font-mono text-neutral-400">
+                      {(task.subtasks || []).filter((s: any) => s.status === 'DONE').length} / {task.subtasks.length} (
+                      {Math.round(
+                        ((task.subtasks || []).filter((s: any) => s.status === 'DONE').length /
+                          task.subtasks.length) *
+                          100
+                      )}
+                      %)
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 bg-[#202020] rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-500 transition-all duration-300"
+                      style={{
+                        width: `${Math.round(
+                          ((task.subtasks || []).filter((s: any) => s.status === 'DONE').length /
+                            task.subtasks.length) *
+                            100
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-1.5">
                 {(task.subtasks || []).map((sub: any) => (
                   <div
                     key={sub.id}
-                    className="flex items-center justify-between p-2.5 rounded bg-[#141414] border border-[#222222] text-xs"
+                    className="flex items-center justify-between p-2.5 rounded bg-[#141414] border border-[#222222] text-xs hover:border-[#333333] transition-colors"
                   >
-                    <div className="flex items-center space-x-2">
-                      <span
-                        className={`w-2 h-2 rounded-full ${
-                          sub.status === 'DONE' ? 'bg-emerald-500' : 'bg-neutral-500'
+                    <div className="flex items-center space-x-2.5 flex-1 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleSubtask(sub.id, sub.status)}
+                        className={`w-4 h-4 rounded border flex items-center justify-center transition-colors shrink-0 ${
+                          sub.status === 'DONE'
+                            ? 'bg-emerald-600 border-emerald-500 text-black'
+                            : 'border-[#3a3a3a] bg-[#1a1a1a] hover:border-neutral-400'
                         }`}
-                      />
-                      <span className={sub.status === 'DONE' ? 'line-through text-neutral-500' : 'text-white'}>
+                        title={sub.status === 'DONE' ? 'Mark subtask as To Do' : 'Mark subtask as Done'}
+                      >
+                        {sub.status === 'DONE' && <Check className="w-3 h-3 text-black stroke-[3]" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentId(sub.id)}
+                        className={`text-left truncate font-medium hover:underline ${
+                          sub.status === 'DONE' ? 'line-through text-neutral-500' : 'text-neutral-200 hover:text-white'
+                        }`}
+                        title="Open subtask details"
+                      >
                         {sub.title}
-                      </span>
+                      </button>
                     </div>
-                    <span className="text-[10px] text-neutral-500 uppercase">{sub.status}</span>
+                    <div className="flex items-center space-x-2 shrink-0 ml-2">
+                      <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[#1e1e1e] text-neutral-400 uppercase">
+                        {sub.status}
+                      </span>
+                      {sub.assignee && (
+                        <span className="text-[10px] text-neutral-400 max-w-[80px] truncate">
+                          {sub.assignee.displayName}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSubtask(sub.id, sub.title)}
+                        className="p-1 text-neutral-500 hover:text-rose-400 rounded transition-colors"
+                        title="Delete subtask"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 ))}
                 {(!task.subtasks || task.subtasks.length === 0) && (
@@ -983,6 +1454,46 @@ export function TaskDetailPanel({
                   <span>Send</span>
                 </button>
               </form>
+            </div>
+          )}
+
+          {/* TAB 4: Activity History */}
+          {activeTab === 'activity' && (
+            <div className="space-y-3">
+              <div className="space-y-2 max-h-[340px] overflow-y-auto">
+                {(task.activities || []).map((act: any) => (
+                  <div
+                    key={act.id}
+                    className="p-3 rounded bg-[#141414] border border-[#222222] text-xs space-y-1"
+                  >
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-semibold text-neutral-200">
+                        {act.user?.displayName || 'Workspace Member'}
+                      </span>
+                      <span className="text-neutral-500 font-mono text-[10px]">
+                        {new Date(act.createdAt).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="px-1.5 py-0.5 rounded font-mono text-[9px] bg-[#1e1e1e] text-neutral-300 border border-[#2c2c2c] uppercase font-semibold">
+                        {act.action.replace(/_/g, ' ')}
+                      </span>
+                      {act.metadata && (
+                        <span className="text-neutral-400 text-[11px] truncate">
+                          {typeof act.metadata === 'string'
+                            ? act.metadata
+                            : JSON.stringify(act.metadata)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {(!task.activities || task.activities.length === 0) && (
+                  <p className="text-xs text-neutral-600 py-6 text-center">
+                    No activity recorded yet for this task.
+                  </p>
+                )}
+              </div>
             </div>
           )}
         </div>

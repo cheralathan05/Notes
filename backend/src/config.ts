@@ -30,9 +30,13 @@ export const config = {
   sessionMaxAge: parseInt(process.env.SESSION_MAX_AGE || String(7 * 24 * 60 * 60 * 1000), 10), // 7 days
 
   // URLs
-  appBaseUrl: process.env.APP_BASE_URL || process.env.APP_URL || 'http://localhost:3000',
-  apiBaseUrl: process.env.API_BASE_URL || 'http://localhost:4000',
-  frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
+  appBaseUrl: (process.env.APP_BASE_URL || process.env.APP_URL || process.env.FRONTEND_URL || 'http://localhost:3001').trim().replace(/\/+$/, ''),
+  apiBaseUrl: (process.env.API_BASE_URL || 'http://localhost:4000').trim().replace(/\/+$/, ''),
+  frontendUrl: (() => {
+    const raw = (process.env.FRONTEND_URL || process.env.APP_BASE_URL || process.env.APP_URL || 'http://localhost:3001').trim().replace(/\/+$/, '');
+    if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
+    return `https://${raw}`;
+  })(),
 
   // Email & SMTP
   emailProvider: process.env.EMAIL_PROVIDER || (process.env.SMTP_USER ? 'smtp' : 'console'),
@@ -50,6 +54,6 @@ export const config = {
   resendCooldown: 60 * 1000,                      // 1 minute
 
   // CORS
-  corsOrigin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  corsOrigin: process.env.FRONTEND_URL || 'http://localhost:3001,http://localhost:3000',
 } as const;
 

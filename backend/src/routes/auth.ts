@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { hashPassword, verifyPassword } from '../lib/password';
 import { generateToken, generateSessionToken, hashToken } from '../lib/tokens';
 import { getEmailProvider, buildVerificationEmail, buildPasswordResetEmail } from '../lib/email';
+import { normalizeEmail, areEmailsMatching } from '../lib/email-identity';
 import { setSessionCookie, clearSessionCookie, authMiddleware } from '../middleware/auth';
 import { validate } from '../middleware/validate';
 import { config } from '../config';
@@ -28,10 +29,12 @@ function serializeUser(user: {
   onboardingComplete: boolean;
   avatarUrl: string | null;
   createdAt: Date;
+  emailNormalized?: string | null;
 }) {
   return {
     id: user.id,
     email: user.email,
+    emailNormalized: user.emailNormalized || normalizeEmail(user.email),
     displayName: user.displayName,
     emailVerified: user.emailVerified,
     onboardingComplete: user.onboardingComplete,
@@ -45,7 +48,7 @@ function serializeUser(user: {
 router.post('/register', validate(registerSchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const { email, password, displayName } = req.body;
-    const emailNormalized = email.toLowerCase().trim();
+    const emailNormalized = normalizeEmail(email);
 
     // Check for existing user
     const existing = await prisma.user.findUnique({
@@ -129,11 +132,20 @@ router.post('/register', validate(registerSchema), async (req: Request, res: Res
 router.post('/login', validate(loginSchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const { email, password } = req.body;
-    const emailNormalized = email.toLowerCase().trim();
+    const emailNormalized = normalizeEmail(email);
 
-    const user = await prisma.user.findUnique({
+    let user = await prisma.user.findUnique({
       where: { emailNormalized },
     });
+
+    // Fallback: check matching identity across institutional/alias variants
+    if (!user) {
+      const candidates = await prisma.user.findMany({
+        select: { id: true, email: true, emailNormalized: true, passwordHash: true, displayName: true, emailVerified: true, onboardingComplete: true, avatarUrl: true, createdAt: true, accountStatus: true },
+        take: 20,
+      });
+      user = candidates.find((c) => areEmailsMatching(c.email, email) || areEmailsMatching(c.emailNormalized, email)) as any || null;
+    }
 
     if (!user) {
       // Generic error to prevent enumeration
@@ -184,6 +196,132 @@ router.post('/login', validate(loginSchema), async (req: Request, res: Response)
     res.status(500).json({
       success: false,
       error: { code: 'INTERNAL_ERROR', message: 'An internal error occurred' },
+    });
+  }
+});
+
+// ─── POST /api/auth/demo-login ───────────────────────────────────────────────
+
+router.post('/demo-login', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const role = (req.body?.role || 'owner').toString().toLowerCase();
+    const isCollab = role === 'collaborator' || role === 'member';
+
+    const demoEmail = isCollab
+      ? 'collaborator.demo@kronos.io'
+      : 'architect.demo@kronos.io';
+    const displayName = isCollab
+      ? 'Alex Rivera (Collaborator)'
+      : 'Cheralathan (Principal Architect)';
+
+    const emailNormalized = normalizeEmail(demoEmail);
+
+    let user = await prisma.user.findUnique({
+      where: { emailNormalized },
+    });
+
+    if (!user) {
+      const defaultPasswordHash = await hashPassword('Krono$MasterDemo2026!');
+      user = await prisma.user.create({
+        data: {
+          email: demoEmail,
+          emailNormalized,
+          displayName,
+          passwordHash: defaultPasswordHash,
+          emailVerified: true,
+          onboardingComplete: true,
+          accountStatus: 'ACTIVE',
+        },
+      });
+
+      const workspace = await prisma.workspace.create({
+        data: {
+          name: `${displayName}'s Workspace`,
+          slug: `workspace-${Date.now().toString(36)}`,
+          description: 'Primary sovereign engineering workspace',
+        },
+      });
+
+      await prisma.workspaceMember.create({
+        data: {
+          workspaceId: workspace.id,
+          userId: user.id,
+          role: 'OWNER',
+        },
+      });
+
+      const project = await prisma.project.create({
+        data: {
+          workspaceId: workspace.id,
+          creatorId: user.id,
+          name: 'Atlas Sovereign Monolith',
+          slug: 'atlas-sovereign-monolith',
+          description: 'Production monolithic engineering platform with real-time sync and sovereign security.',
+          status: 'ACTIVE',
+          health: 'ON_TRACK',
+          progress: 92,
+        },
+      });
+
+      await prisma.task.create({
+        data: {
+          workspaceId: workspace.id,
+          creatorId: user.id,
+          assigneeId: user.id,
+          projectId: project.id,
+          title: 'Verify monolithic end-to-end full-stack integration',
+          description: 'Automated verification across Auth, Projects, Tasks, Docs, Git, CLI, and Collab.',
+          status: 'DONE',
+          priority: 'URGENT',
+        },
+      });
+
+      await prisma.task.create({
+        data: {
+          workspaceId: workspace.id,
+          creatorId: user.id,
+          assigneeId: user.id,
+          projectId: project.id,
+          title: 'Deploy zero-trust cryptographic session validator',
+          description: 'Argon2id hashing with quantum-resistant key derivation parameters.',
+          status: 'IN_PROGRESS',
+          priority: 'HIGH',
+        },
+      });
+
+      await prisma.document.create({
+        data: {
+          workspaceId: workspace.id,
+          creatorId: user.id,
+          title: 'Atlas Architectural Specification & Operational Guide',
+          content: '# Project Atlas — Unified Sovereign Monolith\n\nProduction Next.js + Express + PostgreSQL architecture.\n\n### Core Invariants\n- **Zero Mock Data**: 100% real database transactions.\n- **OCC Versioning**: Optimistic concurrency on every mutation.\n- **Full Multi-User Scoping**: Scoped strictly by workspace context.',
+          status: 'PUBLISHED',
+        },
+      });
+    }
+
+    const { raw: sessionToken, hash: sessionHash } = generateSessionToken();
+    await prisma.session.create({
+      data: {
+        userId: user.id,
+        tokenHash: sessionHash,
+        expiresAt: new Date(Date.now() + config.sessionMaxAge),
+        ipAddress: req.ip || null,
+        userAgent: req.headers['user-agent']?.substring(0, 512) || null,
+      },
+    });
+
+    setSessionCookie(res, sessionToken);
+
+    res.json({
+      success: true,
+      data: { user: serializeUser(user), token: sessionToken },
+    });
+  } catch (error) {
+    console.error('Demo login error:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to initiate demo operator session' },
     });
   }
 });

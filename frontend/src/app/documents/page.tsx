@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, Suspense } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppShell from '@/components/app-shell';
 import {
@@ -32,6 +32,14 @@ import { PriorityIntelligenceHub } from '@/components/documents/priority-intelli
 
 function DocumentLibraryPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const directDocId = searchParams.get('id');
+
+  useEffect(() => {
+    if (directDocId) {
+      router.replace(`/documents/${directDocId}`);
+    }
+  }, [directDocId, router]);
 
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [folders, setFolders] = useState<FolderItem[]>([]);
@@ -100,6 +108,14 @@ function DocumentLibraryPageContent() {
   useEffect(() => {
     loadDocuments();
   }, [selectedFolder, selectedStatus, sortField, sortOrder]);
+
+  useEffect(() => {
+    const handleWsChange = () => {
+      loadDocuments();
+    };
+    window.addEventListener('kronos:workspace-changed', handleWsChange);
+    return () => window.removeEventListener('kronos:workspace-changed', handleWsChange);
+  }, []);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();

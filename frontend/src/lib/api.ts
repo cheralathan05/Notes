@@ -1,16 +1,56 @@
 // Frontend API client for communicating with the backend
 import type { ApiResponse } from './types';
 
-const rawApiUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000').trim().replace(/\/+$/, '');
-export const API_BASE_URL = rawApiUrl.startsWith('http://') || rawApiUrl.startsWith('https://')
-  ? rawApiUrl
-  : `https://${rawApiUrl}`;
+const rawApiUrl = (process.env.NEXT_PUBLIC_API_URL || '').trim().replace(/\/+$/, '');
+export const API_BASE_URL = rawApiUrl
+  ? (rawApiUrl.startsWith('http://') || rawApiUrl.startsWith('https://')
+      ? rawApiUrl
+      : (rawApiUrl.includes('localhost') || rawApiUrl.includes('127.0.0.1') ? `http://${rawApiUrl}` : `https://${rawApiUrl}`))
+  : (typeof window !== 'undefined' ? '' : 'http://127.0.0.1:4000');
 
 class ApiClient {
   private baseUrl: string;
+  private activeWorkspaceId: string | null = null;
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
+    if (typeof window !== 'undefined') {
+      try {
+        this.activeWorkspaceId = localStorage.getItem('kronos:active-workspace-id');
+      } catch {
+        // Ignored in SSR
+      }
+    }
+  }
+
+  public setActiveWorkspaceId(id: string | null): void {
+    const previous = this.activeWorkspaceId;
+    this.activeWorkspaceId = id;
+    if (typeof window !== 'undefined') {
+      try {
+        if (id) {
+          localStorage.setItem('kronos:active-workspace-id', id);
+        } else {
+          localStorage.removeItem('kronos:active-workspace-id');
+        }
+        if (previous !== id) {
+          window.dispatchEvent(new CustomEvent('kronos:workspace-changed', { detail: { workspaceId: id } }));
+        }
+      } catch {
+        // Ignored
+      }
+    }
+  }
+
+  public getActiveWorkspaceId(): string | null {
+    if (!this.activeWorkspaceId && typeof window !== 'undefined') {
+      try {
+        this.activeWorkspaceId = localStorage.getItem('kronos:active-workspace-id');
+      } catch {
+        // Ignored
+      }
+    }
+    return this.activeWorkspaceId;
   }
 
   private async request<T>(
@@ -19,12 +59,21 @@ class ApiClient {
   ): Promise<ApiResponse<T>> {
     const url = `${this.baseUrl}${path}`;
 
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    const currentWs = this.getActiveWorkspaceId();
+    if (currentWs) {
+      headers['x-workspace-id'] = currentWs;
+    }
+
     try {
       const response = await fetch(url, {
         ...options,
         credentials: 'include', // Always send cookies
         headers: {
-          'Content-Type': 'application/json',
+          ...headers,
           ...options.headers,
         },
       });
@@ -585,7 +634,14 @@ class ApiClient {
   }
 
   async acceptInvitation(token: string) {
-    return this.request<{ documentId: string; documentTitle: string; role: DocumentRoleType; message: string }>(
+    return this.request<{
+      documentId?: string;
+      documentTitle?: string;
+      role?: DocumentRoleType;
+      message: string;
+      workspaceId?: string;
+      redirectUrl?: string;
+    }>(
       '/api/invitations/accept',
       {
         method: 'POST',
@@ -649,6 +705,7 @@ class ApiClient {
     dueDate?: string;
     startDate?: string;
     estimatedHours?: number;
+    acceptanceCriteria?: any;
   }) {
     return this.request<{ task: TaskItem }>('/api/tasks', {
       method: 'POST',
@@ -676,7 +733,7 @@ class ApiClient {
     });
   }
 
-  async bulkTasks(taskIds: string[], action: 'complete' | 'reopen' | 'delete' | 'archive' | 'status' | 'priority', data?: any) {
+  async bulkTasks(taskIds: string[], action: 'complete' | 'reopen' | 'delete' | 'archive' | 'status' | 'priority' | 'assign', data?: any) {
     return this.request<{ affected: number }>('/api/tasks/bulk', {
       method: 'POST',
       body: JSON.stringify({ taskIds, action, data }),
@@ -714,6 +771,30 @@ class ApiClient {
     });
   }
 
+  async getTaskLabels() {
+    return this.request<{ labels: Array<{ id: string; name: string; color: string }> }>('/api/tasks/labels');
+  }
+
+  async createTaskLabel(name: string, color?: string) {
+    return this.request<{ label: { id: string; name: string; color: string } }>('/api/tasks/labels', {
+      method: 'POST',
+      body: JSON.stringify({ name, color }),
+    });
+  }
+
+  async addTaskLabel(taskId: string, data: { labelId?: string; name?: string; color?: string }) {
+    return this.request<{ assignment: any }>(`/api/tasks/${taskId}/labels`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async removeTaskLabel(taskId: string, labelId: string) {
+    return this.request<{ removed: boolean }>(`/api/tasks/${taskId}/labels/${labelId}`, {
+      method: 'DELETE',
+    });
+  }
+
   async addTaskComment(taskId: string, content: string) {
     return this.request<{ comment: TaskCommentItemType }>(`/api/tasks/${taskId}/comments`, {
       method: 'POST',
@@ -723,8 +804,29 @@ class ApiClient {
 
   // ─── Projects API ──────────────────────────────────────────────────────────
 
-  async getProjects(status?: string) {
-    const query = status ? `?status=${status}` : '';
+  async getProjects(statusOrOptions?: string | { search?: string; status?: string; includeArchived?: boolean; sortBy?: string; sortOrder?: string; workspaceId?: string }) {
+    let query = '';
+    if (typeof statusOrOptions === 'string') {
+      const trimmed = statusOrOptions.trim().toUpperCase();
+      if (trimmed && trimmed !== 'ALL' && !trimmed.includes('OBJECT')) {
+        query = `?status=${encodeURIComponent(trimmed)}`;
+      }
+    } else if (statusOrOptions && typeof statusOrOptions === 'object') {
+      const p = new URLSearchParams();
+      if (statusOrOptions.search && typeof statusOrOptions.search === 'string') p.set('search', statusOrOptions.search.trim());
+      if (statusOrOptions.status && typeof statusOrOptions.status === 'string') {
+        const trimmed = statusOrOptions.status.trim().toUpperCase();
+        if (trimmed && trimmed !== 'ALL' && !trimmed.includes('OBJECT')) {
+          p.set('status', trimmed);
+        }
+      }
+      if (statusOrOptions.includeArchived) p.set('includeArchived', 'true');
+      if (statusOrOptions.sortBy) p.set('sortBy', String(statusOrOptions.sortBy));
+      if (statusOrOptions.sortOrder) p.set('sortOrder', String(statusOrOptions.sortOrder));
+      if (statusOrOptions.workspaceId) p.set('workspaceId', String(statusOrOptions.workspaceId));
+      const str = p.toString();
+      query = str ? `?${str}` : '';
+    }
     return this.request<{ projects: ProjectItem[] }>(`/api/projects${query}`);
   }
 
@@ -735,6 +837,8 @@ class ApiClient {
   async createProject(data: {
     name: string;
     description?: string;
+    color?: string;
+    icon?: string;
     startDate?: string;
     targetDate?: string;
   }) {
@@ -770,10 +874,16 @@ class ApiClient {
     });
   }
 
-  async updateMilestone(projectId: string, milestoneId: string, data: { isCompleted?: boolean; title?: string; targetDate?: string }) {
+  async updateMilestone(projectId: string, milestoneId: string, data: { isCompleted?: boolean; title?: string; targetDate?: string; description?: string }) {
     return this.request<{ milestone: any }>(`/api/projects/${projectId}/milestones/${milestoneId}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
+    });
+  }
+
+  async deleteMilestone(projectId: string, milestoneId: string) {
+    return this.request<{ deleted: boolean }>(`/api/projects/${projectId}/milestones/${milestoneId}`, {
+      method: 'DELETE',
     });
   }
 
@@ -823,7 +933,7 @@ class ApiClient {
     return this.request<{ session: FocusSessionItem | null }>('/api/focus/active');
   }
 
-  async startFocusSession(data: { taskId?: string; title: string; targetMinutes?: number }) {
+  async startFocusSession(data: { taskId?: string; title: string; targetMinutes?: number; notes?: string }) {
     return this.request<{ session: FocusSessionItem }>('/api/focus/start', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -842,17 +952,43 @@ class ApiClient {
     });
   }
 
-  async completeFocusSession(id: string, notes?: string) {
+  async completeFocusSession(id: string, notes?: string, distractions?: number) {
     return this.request<{ session: FocusSessionItem }>(`/api/focus/${id}/complete`, {
       method: 'POST',
-      body: JSON.stringify({ notes }),
+      body: JSON.stringify({ notes, distractions }),
+    });
+  }
+
+  async cancelFocusSession(id: string) {
+    return this.request<{ session: FocusSessionItem }>(`/api/focus/${id}/cancel`, {
+      method: 'POST',
+    });
+  }
+
+  async recordDistraction(id: string, note?: string) {
+    return this.request<{ session: FocusSessionItem }>(`/api/focus/${id}/distraction`, {
+      method: 'POST',
+      body: JSON.stringify({ note }),
     });
   }
 
   async getFocusTotals() {
-    return this.request<{ todayMinutes: number; todayHours: number; weekMinutes: number; weekHours: number }>(
-      '/api/focus/totals'
-    );
+    return this.request<{
+      todayMinutes: number;
+      todayHours: number;
+      weekMinutes: number;
+      weekHours: number;
+      completedCountToday?: number;
+      completedCountWeek?: number;
+    }>('/api/focus/totals');
+  }
+
+  async getFocusSessionHistory(options: { limit?: number; taskId?: string } = {}) {
+    const params = new URLSearchParams();
+    if (options.limit) params.set('limit', String(options.limit));
+    if (options.taskId) params.set('taskId', options.taskId);
+    const qs = params.toString();
+    return this.request<{ sessions: FocusSessionItem[] }>(`/api/focus/history${qs ? `?${qs}` : ''}`);
   }
 
   async getTimeEntries(options: { taskId?: string; projectId?: string } = {}) {
@@ -863,14 +999,29 @@ class ApiClient {
     return this.request<{ entries: TimeEntryItem[] }>(`/api/focus/entries${qs ? `?${qs}` : ''}`);
   }
 
-  // ─── Goals API ─────────────────────────────────────────────────────────────
+  // ─── Goals & OKRs API ───────────────────────────────────────────────────────
 
-  async getGoals(status?: string, category?: string) {
+  async getGoals(optionsOrStatus?: string | { status?: string; category?: string; search?: string; projectId?: string }, categoryParam?: string) {
     const params = new URLSearchParams();
-    if (status) params.set('status', status);
-    if (category) params.set('category', category);
+    if (typeof optionsOrStatus === 'string') {
+      if (optionsOrStatus && optionsOrStatus !== 'ALL') params.set('status', optionsOrStatus);
+      if (categoryParam && categoryParam !== 'ALL') params.set('category', categoryParam);
+    } else if (optionsOrStatus && typeof optionsOrStatus === 'object') {
+      if (optionsOrStatus.status && optionsOrStatus.status !== 'ALL') params.set('status', optionsOrStatus.status);
+      if (optionsOrStatus.category && optionsOrStatus.category !== 'ALL') params.set('category', optionsOrStatus.category);
+      if (optionsOrStatus.search) params.set('search', optionsOrStatus.search);
+      if (optionsOrStatus.projectId) params.set('projectId', optionsOrStatus.projectId);
+    }
     const qs = params.toString();
     return this.request<{ goals: GoalItem[] }>(`/api/goals${qs ? `?${qs}` : ''}`);
+  }
+
+  async getGoalMetrics() {
+    return this.request<GoalMetricsData>('/api/goals/metrics');
+  }
+
+  async getGoal(id: string) {
+    return this.request<{ goal: GoalItem }>(`/api/goals/${id}`);
   }
 
   async createGoal(data: {
@@ -881,10 +1032,30 @@ class ApiClient {
     currentValue?: number;
     unit?: string;
     targetDate?: string;
+    timePeriod?: string;
+    ownerId?: string;
     projectId?: string;
+    status?: string;
+    keyResults?: Array<{
+      title: string;
+      description?: string;
+      type?: 'INCREASE' | 'DECREASE' | 'BINARY' | 'MILESTONE';
+      startValue?: number;
+      targetValue?: number;
+      currentValue?: number;
+      unit?: string;
+      weight?: number;
+    }>;
   }) {
     return this.request<{ goal: GoalItem }>('/api/goals', {
       method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateGoal(id: string, data: Partial<GoalItem>) {
+    return this.request<{ goal: GoalItem }>(`/api/goals/${id}`, {
+      method: 'PATCH',
       body: JSON.stringify(data),
     });
   }
@@ -893,6 +1064,43 @@ class ApiClient {
     return this.request<{ goal: GoalItem; checkIn: any }>(`/api/goals/${id}/check-in`, {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+  }
+
+  async addKeyResult(goalId: string, data: {
+    title: string;
+    description?: string;
+    type?: 'INCREASE' | 'DECREASE' | 'BINARY' | 'MILESTONE';
+    startValue?: number;
+    targetValue?: number;
+    currentValue?: number;
+    unit?: string;
+    weight?: number;
+    ownerId?: string;
+    dueDate?: string;
+  }) {
+    return this.request<{ keyResult: KeyResultItem }>(`/api/goals/${goalId}/key-results`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateKeyResult(krId: string, data: {
+    newValue?: number;
+    note?: string;
+    title?: string;
+    status?: string;
+    dueDate?: string;
+  }) {
+    return this.request<{ keyResult: KeyResultItem }>(`/api/goals/key-results/${krId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteKeyResult(krId: string) {
+    return this.request<{ deleted: boolean }>(`/api/goals/key-results/${krId}`, {
+      method: 'DELETE',
     });
   }
 
@@ -942,8 +1150,12 @@ class ApiClient {
     return this.request<DailyCommandCenterData>('/api/analytics/command-center');
   }
 
-  async getWorkspaceAnalytics() {
-    return this.request<WorkspaceAnalyticsData>('/api/analytics/workspace');
+  async getWorkspaceAnalytics(params?: { projectId?: string; dateRange?: string }) {
+    const query = new URLSearchParams();
+    if (params?.projectId) query.append('projectId', params.projectId);
+    if (params?.dateRange) query.append('dateRange', params.dateRange);
+    const qs = query.toString() ? `?${query.toString()}` : '';
+    return this.request<WorkspaceAnalyticsData>(`/api/analytics/workspace${qs}`);
   }
 
   // ─── Project Atlas Developer Workspace API ──────────────────────────────────
@@ -1074,6 +1286,359 @@ class ApiClient {
     });
   }
 
+
+  // ─── Workspace Operations ──────────────────────────────────────────────────
+  async listWorkspaces() {
+    return this.request<{ workspaces: WorkspacePublic[] }>('/api/collaboration/workspaces');
+  }
+
+  async createWorkspace(data: { name: string; description?: string }) {
+    return this.request<{ workspace: WorkspacePublic }>('/api/collaboration/workspaces', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async demoLogin(role: 'owner' | 'collaborator' = 'owner') {
+    return this.request<{ user: UserPublic }>(`/api/auth/demo-login?role=${role}`, {
+      method: 'POST',
+    });
+  }
+
+  // ─── Repositories & Integrations ───────────────────────────────────────────
+  async getGitHubStatus(workspaceId?: string) {
+    const qs = workspaceId ? `?workspaceId=${workspaceId}` : '';
+    return this.request<{ isConnected: boolean; accounts?: any[] }>(`/api/integrations/github/status${qs}`);
+  }
+
+  async listGitHubRepos(workspaceId?: string) {
+    const qs = workspaceId ? `?workspaceId=${workspaceId}` : '';
+    return this.request<{ repositories: any[] }>(`/api/integrations/github/repos${qs}`);
+  }
+
+  async connectGitHub(data: any) {
+    return this.request<{ connection: any }>('/api/integrations/github/connect', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async disconnectGitHub() {
+    return this.request<{ success: boolean }>('/api/integrations/github/disconnect', {
+      method: 'POST',
+    });
+  }
+
+  async importGitHubRepo(data: any) {
+    return this.request<{ repository: any }>('/api/integrations/github/import', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getRepository(id: string) {
+    return this.request<{ repository: RepositoryItem }>(`/api/repositories/${id}`);
+  }
+
+  async getRepositoryBranches(id: string) {
+    return this.request<{ branches: GitBranchItem[] }>(`/api/repositories/${id}/branches`);
+  }
+
+  async getRepositoryCommits(id: string, limitOrBranch: string | number = 30) {
+    const param = typeof limitOrBranch === 'number' ? ('limit=' + limitOrBranch) : ('branch=' + limitOrBranch);
+    return this.request<{ commits: GitCommitItem[] }>('/api/repositories/' + id + '/commits?' + param);
+  }
+
+  async getRepositoryStatus(id: string) {
+    return this.request<{ status: any }>('/api/repositories/' + id + '/status');
+  }
+
+  async getGitHubActivity(ownerOrRepoId: string, repoName?: string) {
+    const p = repoName
+      ? ('/api/integrations/github/activity?owner=' + ownerOrRepoId + '&repo=' + repoName)
+      : ('/api/integrations/github/repos/' + ownerOrRepoId + '/activity');
+    return this.request<GitHubActivity>(p);
+  }
+
+  async getRepositoryDiff(id: string, branch?: string) {
+    const qs = branch ? `?branch=${encodeURIComponent(branch)}` : '';
+    return this.request<{ diff: string; files?: any[] }>(`/api/repositories/${id}/diff${qs}`);
+  }
+
+  async syncRepository(id: string) {
+    return this.request<{ repository: RepositoryItem }>(`/api/repositories/${id}/sync`, {
+      method: 'POST',
+    });
+  }
+
+  async linkTaskToRepository(repositoryId: string, taskId: string, branchName?: string) {
+    return this.request<{ link: any }>(`/api/repositories/${repositoryId}/tasks/${taskId}/link`, {
+      method: 'POST',
+      body: JSON.stringify({ branchName }),
+    });
+  }
+
+  async unlinkTaskFromRepository(repositoryId: string, taskId: string) {
+    return this.request<{ success: boolean }>(`/api/repositories/${repositoryId}/tasks/${taskId}/link`, {
+      method: 'DELETE',
+    });
+  }
+
+  // ─── Code Reviews ───────────────────────────────────────────────────────────
+  async listCodeReviews(repositoryId?: string) {
+    const qs = repositoryId ? `?repositoryId=${repositoryId}` : '';
+    return this.request<{ reviews: CodeReviewItem[] }>(`/api/reviews${qs}`);
+  }
+
+  async getCodeReview(id: string) {
+    return this.request<{ review: CodeReviewDetail; diff?: string }>(`/api/reviews/${id}`);
+  }
+
+  async createCodeReview(data: any) {
+    return this.request<{ review: CodeReviewItem }>('/api/reviews', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async addCodeReviewComment(reviewId: string, data: any) {
+    return this.request<{ comment: any }>(`/api/reviews/${reviewId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify(typeof data === 'string' ? { content: data } : data),
+    });
+  }
+
+  async submitCodeReviewAction(reviewId: string, actionOrData: any, comment?: string) {
+    const payload = typeof actionOrData === 'string' ? { action: actionOrData, comment } : actionOrData;
+    return this.request<{ review: any; action: any }>(`/api/reviews/${reviewId}/actions`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // ─── Canvases ──────────────────────────────────────────────────────────────
+  async listCanvases() {
+    return this.request<{ canvases: CanvasItem[] }>('/api/canvases');
+  }
+
+  async getCanvas(id: string) {
+    return this.request<{ canvas: CanvasItem }>(`/api/canvases/${id}`);
+  }
+
+  async createCanvas(data: any) {
+    return this.request<{ canvas: CanvasItem }>('/api/canvases', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateCanvas(id: string, data: any) {
+    return this.request<{ canvas: CanvasItem }>(`/api/canvases/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async duplicateCanvas(id: string) {
+    return this.request<{ canvas: CanvasItem }>(`/api/canvases/${id}/duplicate`, {
+      method: 'POST',
+    });
+  }
+
+  async getCanvasTemplates() {
+    return this.request<{ templates: Record<string, any> }>('/api/canvases/templates');
+  }
+
+
+  // ─── Collaboration Extended ───────────────────────────────────────────────
+  async getCollaborationOverview(workspaceId?: string) {
+    const qs = workspaceId ? ('?workspaceId=' + workspaceId) : '';
+    return this.request<any>('/api/collaboration/overview' + qs);
+  }
+
+  async listWorkspaceMembers(params?: string | { workspaceId?: string; search?: string; role?: string; page?: number; limit?: number }) {
+    if (typeof params === 'string') {
+      const qs = params ? ('?workspaceId=' + params) : '';
+      return this.request<any>('/api/collaboration/members' + qs);
+    }
+    const searchParams = new URLSearchParams();
+    if (params?.workspaceId) searchParams.set('workspaceId', params.workspaceId);
+    if (params?.search) searchParams.set('search', params.search);
+    if (params?.role) searchParams.set('role', params.role);
+    if (params?.page) searchParams.set('page', String(params.page));
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    const qs = searchParams.toString();
+    return this.request<any>('/api/collaboration/members' + (qs ? ('?' + qs) : ''));
+  }
+
+  async listPendingInvitations(workspaceId?: string) {
+    const qs = workspaceId ? ('?workspaceId=' + workspaceId) : '';
+    return this.request<any>('/api/collaboration/invitations/pending' + qs);
+  }
+
+  async getWorkspaceActivity(params?: string | { workspaceId?: string; limit?: number }) {
+    if (typeof params === 'string') {
+      const qs = params ? ('?workspaceId=' + params) : '';
+      return this.request<any>('/api/collaboration/activity' + qs);
+    }
+    const searchParams = new URLSearchParams();
+    if (params?.workspaceId) searchParams.set('workspaceId', params.workspaceId);
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    const qs = searchParams.toString();
+    return this.request<any>('/api/collaboration/activity' + (qs ? ('?' + qs) : ''));
+  }
+
+  async sendPresenceHeartbeat(params: string | { workspaceId: string; status?: string; activeDocumentId?: string }, status?: string) {
+    const body = typeof params === 'string' ? { workspaceId: params, status } : params;
+    return this.request<any>('/api/collaboration/presence/heartbeat', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async updateWorkspace(id: string, data: any) {
+    return this.request<any>('/api/collaboration/workspaces/' + id, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async inviteWorkspaceMember(data: any) {
+    return this.request<any>('/api/collaboration/invitations', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async resendWorkspaceInvitation(id: string) {
+    return this.request<any>('/api/collaboration/invitations/' + id + '/resend', {
+      method: 'POST',
+    });
+  }
+
+  async revokeWorkspaceInvitation(id: string) {
+    return this.request<any>('/api/collaboration/invitations/' + id, {
+      method: 'DELETE',
+    });
+  }
+
+  async updateWorkspaceMemberRole(first: string, second: string, third?: string) {
+    const memberId = third ? second : first;
+    const role = third ? third : second;
+    return this.request<any>('/api/collaboration/members/' + memberId + '/role', {
+      method: 'PATCH',
+      body: JSON.stringify({ role }),
+    });
+  }
+
+  async removeWorkspaceMember(first: string, second?: string) {
+    const memberId = second ? second : first;
+    return this.request<any>('/api/collaboration/members/' + memberId, {
+      method: 'DELETE',
+    });
+  }
+
+  async archiveProject(id: string) {
+    return this.request<{ project: ProjectItem }>(`/api/projects/${id}/archive`, {
+      method: 'POST',
+    });
+  }
+
+  async unarchiveProject(id: string) {
+    return this.request<{ project: ProjectItem }>(`/api/projects/${id}/unarchive`, {
+      method: 'POST',
+    });
+  }
+
+  // ─── Chat Operations ──────────────────────────────────────────────────────
+  async getChatChannels() {
+    return this.request<any>('/api/chat/channels');
+  }
+
+  async getChatMessages(channel?: string, limit?: number) {
+    const p = new URLSearchParams();
+    if (channel) p.set('channel', channel);
+    if (limit) p.set('limit', String(limit));
+    const qs = p.toString();
+    return this.request<any>(`/api/chat/messages${qs ? `?${qs}` : ''}`);
+  }
+
+  async sendChatMessage(data: any) {
+    return this.request<any>('/api/chat/messages', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async toggleChatReaction(messageId: string, emoji: string) {
+    return this.request<any>(`/api/chat/messages/${messageId}/reactions`, {
+      method: 'POST',
+      body: JSON.stringify({ emoji }),
+    });
+  }
+
+  async toggleChatPin(messageId: string) {
+    return this.request<any>(`/api/chat/messages/${messageId}/pin`, {
+      method: 'PATCH',
+    });
+  }
+
+  async deleteChatMessage(messageId: string) {
+    return this.request<any>(`/api/chat/messages/${messageId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async editChatMessage(messageId: string, content: string) {
+    return this.request<any>(`/api/chat/messages/${messageId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ content }),
+    });
+  }
+
+  async createChatChannel(data: { name: string; description?: string; topic?: string; isPrivate?: boolean }) {
+    return this.request<any>('/api/chat/channels', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateChatChannel(id: string, data: { topic?: string; description?: string; isArchived?: boolean; name?: string }) {
+    return this.request<any>(`/api/chat/channels/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getChatChannelMembers(channelId: string) {
+    return this.request<any>(`/api/chat/channels/${channelId}/members`);
+  }
+
+  async addChatChannelMember(channelId: string, targetUserId: string, role = 'MEMBER') {
+    return this.request<any>(`/api/chat/channels/${channelId}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ targetUserId, role }),
+    });
+  }
+
+  async removeChatChannelMember(channelId: string, targetUserId: string) {
+    return this.request<any>(`/api/chat/channels/${channelId}/members/${targetUserId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async searchChatMessages(q: string, channel?: string) {
+    const p = new URLSearchParams({ q });
+    if (channel) p.set('channel', channel);
+    return this.request<any>(`/api/chat/search?${p.toString()}`);
+  }
+
+  async deleteCanvas(id: string) {
+    return this.request<{ deleted: boolean; canvasId: string }>(`/api/canvases/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
   async getAiHandoffSummary(taskId: string) {
     return this.request<{ handoffSummary: any }>('/api/ai/handoff-summary', {
       method: 'POST',
@@ -1083,10 +1648,10 @@ class ApiClient {
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-
 export interface UserPublic {
   id: string;
   email: string;
+  emailNormalized?: string;
   displayName: string;
   emailVerified: boolean;
   onboardingComplete: boolean;
@@ -1278,6 +1843,15 @@ export interface DocumentAccessData {
 }
 
 export interface InvitationDetails {
+  type?: 'workspace' | 'document';
+  workspaceId?: string;
+  redirectUrl?: string;
+  workspace?: {
+    id: string;
+    name: string;
+    slug?: string;
+    description?: string | null;
+  };
   document: {
     id: string;
     title: string;
@@ -1354,6 +1928,8 @@ export interface TaskItem {
   assignee?: { id: string; displayName: string; email: string; avatarUrl?: string | null };
   project?: { id: string; name: string; color?: string; icon?: string };
   document?: { id: string; title: string; icon?: string | null };
+  parent?: { id: string; title: string } | null;
+  activities?: any[];
   subtasks?: any[];
   checklists?: TaskChecklistItemType[];
   comments?: TaskCommentItemType[];
@@ -1368,6 +1944,10 @@ export interface TaskItem {
   isVerified?: boolean;
   verifiedAt?: string | null;
   evidence?: TaskEvidenceItem[];
+  labels?: Array<{ label: { id: string; name: string; color: string } }>;
+  estimatedHours?: number | null;
+  actualHours?: number | null;
+  completedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1400,6 +1980,12 @@ export interface RepositoryItem {
   defaultBranch: string;
   localPath?: string | null;
   description?: string | null;
+  status?: string;
+  isLocalReachable?: boolean;
+  uncommittedChangesCount?: number;
+  isClean?: boolean;
+  liveBranch?: string;
+  liveCommit?: any;
   project?: { id: string; name: string; color?: string | null };
   _count?: { tasks: number };
   createdAt: string;
@@ -1436,6 +2022,8 @@ export interface ProjectItem {
   members?: Array<{ id: string; user: { id: string; displayName: string; email: string } }>;
   milestones?: Array<{ id: string; title: string; dueDate?: string | null; isCompleted: boolean }>;
   _count?: { tasks: number };
+  tasks?: TaskItem[];
+  isArchived?: boolean;
 }
 
 export interface MyDayData {
@@ -1479,6 +2067,7 @@ export interface NotificationItem {
 
 export interface FocusSessionItem {
   id: string;
+  actualMinutes?: number;
   workspaceId: string;
   userId: string;
   taskId?: string | null;
@@ -1489,6 +2078,11 @@ export interface FocusSessionItem {
   startedAt: string;
   endedAt?: string | null;
   notes?: string | null;
+  distractions?: number;
+  distractionNotes?: string | null;
+  currentElapsedSeconds?: number;
+  remainingSeconds?: number;
+  isExpired?: boolean;
   task?: { id: string; title: string; priority: string; status: string } | null;
 }
 
@@ -1507,13 +2101,52 @@ export interface TimeEntryItem {
   project?: { id: string; name: string } | null;
 }
 
+export interface KeyResultItem {
+  id: string;
+  goalId: string;
+  title: string;
+  description?: string | null;
+  type: 'INCREASE' | 'DECREASE' | 'BINARY' | 'MILESTONE';
+  startValue: number;
+  targetValue: number;
+  currentValue: number;
+  unit: string;
+  weight: number;
+  status: 'NOT_STARTED' | 'IN_PROGRESS' | 'ACHIEVED' | 'AT_RISK';
+  ownerId?: string | null;
+  dueDate?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  progressPercentage: number;
+  rawProgress?: number;
+  owner?: { id: string; displayName: string; email: string } | null;
+  updates?: Array<{
+    id: string;
+    previousValue: number;
+    newValue: number;
+    note?: string | null;
+    createdAt: string;
+    user: { id: string; displayName: string };
+  }>;
+}
+
+export interface GoalMetricsData {
+  totalGoals: number;
+  achievedGoals: number;
+  inProgressGoals: number;
+  atRiskGoals: number;
+  averageProgress: number;
+}
+
 export interface GoalItem {
   id: string;
   workspaceId: string;
   creatorId: string;
+  ownerId?: string | null;
   title: string;
   description?: string | null;
   category: string;
+  timePeriod?: string | null;
   targetValue: number;
   currentValue: number;
   unit: string;
@@ -1523,8 +2156,12 @@ export interface GoalItem {
   projectId?: string | null;
   progressPercentage: number;
   project?: { id: string; name: string; color?: string; progress?: number } | null;
-  creator?: { id: string; displayName: string; email: string };
+  creator?: { id: string; displayName: string; email: string; avatarUrl?: string | null };
+  owner?: { id: string; displayName: string; email: string; avatarUrl?: string | null } | null;
+  keyResults?: KeyResultItem[];
   checkIns?: Array<{ id: string; previousValue: number; newValue: number; note?: string; createdAt: string; user?: { id: string; displayName: string } }>;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface AutomationItem {
@@ -1608,15 +2245,19 @@ export interface DailyCommandCenterData {
 export interface WorkspaceAnalyticsData {
   summary: {
     totalTasks: number;
+    eligibleTasksCount?: number;
     completedTasks: number;
     completionRate: number;
+    tasksWithDueDatesCount?: number;
     overdueCount: number;
     overdueRate: number;
     averageCycleHours: number;
     velocityLast7Days: number;
     velocityPrevious7Days: number;
     velocityTrend: number;
+    velocityPercentageChange?: number;
   };
+  dailyTrend?: Array<{ date: string; dayName: string; completed: number }>;
   statusDistribution: Record<string, number>;
   priorityDistribution: Record<string, number>;
   projectsHealth: {
@@ -1625,6 +2266,15 @@ export interface WorkspaceAnalyticsData {
     offTrack: number;
     total: number;
   };
+  projectsExecution?: Array<{
+    id: string;
+    name: string;
+    health: string;
+    progress: number;
+    totalTasks: number;
+    doneTasks: number;
+    overdueTasks: number;
+  }>;
   goalsMetric: {
     total: number;
     achieved: number;
@@ -1635,5 +2285,319 @@ export interface WorkspaceAnalyticsData {
 export const api = new ApiClient(API_BASE_URL);
 
 
+export type WorkspacePublic = WorkspaceItem;
 
+export interface WorkspaceItem {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string | null;
+  role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
+  joinedAt?: string;
+  memberCount: number;
+  taskCount?: number;
+  repoCount?: number;
+  projectCount?: number;
+  isCurrent?: boolean;
+}
 
+export interface WorkspaceMemberItem {
+  id: string;
+  workspaceId: string;
+  userId: string;
+  role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
+  joinedAt: string;
+  isOnline?: boolean;
+  lastActiveAt?: string;
+  assignedWork?: {
+    totalAssigned: number;
+    completed: number;
+    active: number;
+  };
+  user: {
+    id: string;
+    displayName: string;
+    email: string;
+    avatarUrl?: string | null;
+  };
+}
+
+export interface WorkspaceInvitationItem {
+  id: string;
+  workspaceId: string;
+  inviterId: string;
+  recipientEmail: string;
+  role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
+  status: 'PENDING' | 'ACCEPTED' | 'REVOKED' | 'EXPIRED';
+  message?: string | null;
+  expiresAt: string;
+  createdAt: string;
+  inviteUrl?: string;
+  inviter?: {
+    displayName: string;
+    email: string;
+  };
+}
+
+export interface WorkspaceActivityItem {
+  id: string;
+  workspaceId: string;
+  userId?: string | null;
+  action: string;
+  entityType: string;
+  entityId?: string | null;
+  metadata?: any;
+  createdAt: string;
+  user?: {
+    id: string;
+    displayName: string;
+    email: string;
+    avatarUrl?: string | null;
+  } | null;
+}
+
+export interface MentionableUserItem {
+  id: string;
+  displayName: string;
+  email: string;
+  avatarUrl?: string | null;
+  role: string;
+}
+
+export interface ActiveCollaboratorItem {
+  userId: string;
+  displayName: string;
+  email: string;
+  avatarUrl?: string | null;
+  workspaceId: string;
+  documentId?: string | null;
+  joinedAt: string;
+  lastSeenAt: string;
+}
+
+export interface CollaborationOverviewData {
+  workspace: {
+    id: string;
+    name: string;
+    role: string;
+  };
+  metrics: {
+    totalMembers: number;
+    pendingInvitations: number;
+    activeCollaboratorsCount: number;
+    sharedDocumentsCount: number;
+    repositoriesCount?: number;
+    tasksCount?: number;
+    reviewsCount?: number;
+  };
+  activeCollaborators: ActiveCollaboratorItem[];
+  recentActivities: WorkspaceActivityItem[];
+}
+
+export interface CodeReviewItem {
+  id: string;
+  workspaceId: string;
+  repositoryId: string;
+  taskId?: string | null;
+  authorId: string;
+  title: string;
+  description?: string | null;
+  sourceBranch: string;
+  targetBranch: string;
+  status: 'DRAFT' | 'OPEN' | 'REVIEW_REQUESTED' | 'CHANGES_REQUESTED' | 'APPROVED' | 'MERGED' | 'CLOSED';
+  commitHash?: string | null;
+  pullRequestUrl?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  author: {
+    id: string;
+    displayName: string;
+    email: string;
+    avatarUrl?: string | null;
+  };
+  repository: {
+    id: string;
+    name: string;
+    slug: string;
+    defaultBranch?: string;
+  };
+  task?: {
+    id: string;
+    title: string;
+    status: string;
+    priority: string;
+  } | null;
+  _count?: {
+    comments: number;
+    actions: number;
+  };
+}
+
+export interface CodeReviewCommentItem {
+  id: string;
+  reviewId: string;
+  userId: string;
+  filePath?: string | null;
+  lineNumber?: number | null;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+  user: {
+    id: string;
+    displayName: string;
+    email: string;
+    avatarUrl?: string | null;
+  };
+}
+
+export interface CodeReviewActionItem {
+  id: string;
+  reviewId: string;
+  userId: string;
+  action: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT' | 'CLOSE' | 'REOPEN';
+  summary?: string | null;
+  createdAt: string;
+  user: {
+    id: string;
+    displayName: string;
+    email: string;
+  };
+}
+
+export interface CodeReviewDetail extends CodeReviewItem {
+  diff?: string;
+  comments: CodeReviewCommentItem[];
+  actions: CodeReviewActionItem[];
+  task?: {
+    id: string;
+    title: string;
+    status: string;
+    priority: string;
+    acceptanceCriteria?: any;
+    isVerified?: boolean;
+  } | null;
+}
+
+export interface GitBranchItem {
+  name: string;
+  isCurrent: boolean;
+  commitHash?: string;
+  isRemote?: boolean;
+  subject?: string;
+}
+
+export interface GitCommitItem {
+  hash: string;
+  shortHash?: string;
+  message: string;
+  author: string;
+  authorName?: string;
+  date: string;
+  relativeDate?: string;
+  matchedTask?: any;
+}
+
+export interface GitWorkingTreeStatus {
+  branch: string;
+  isClean: boolean;
+  uncommittedFiles?: string[];
+  files?: Array<{ path: string; status: string; staged: boolean }>;
+  ahead: number;
+  behind: number;
+}
+
+export interface RepositoryDetail extends RepositoryItem {
+  lastSyncedAt?: string | null;
+  branches?: GitBranchItem[];
+  commits?: GitCommitItem[];
+  statusData?: GitWorkingTreeStatus;
+  reviews?: CodeReviewItem[];
+  tasks?: any[];
+  diff?: string;
+}
+
+export interface GitHubRepoItem {
+  id: number;
+  name: string;
+  fullName: string;
+  owner: string;
+  htmlUrl: string;
+  cloneUrl: string;
+  defaultBranch: string;
+  isPrivate: boolean;
+  description: string | null;
+}
+
+export interface GitHubActivity {
+  owner?: string;
+  repo?: string;
+  commits: Array<{ message: string; author: string; date: string; sha: string }>;
+  pullRequests: Array<{ title: string; number: number; state: string; user: string; url: string }>;
+}
+
+export interface ChatChannelItem {
+  id: string;
+  name: string;
+  description: string;
+  topic?: string;
+  isPrivate?: boolean;
+  isArchived?: boolean;
+  createdById?: string | null;
+  messageCount: number;
+  lastMessage?: {
+    id: string;
+    content: string;
+    createdAt: string;
+    author: string;
+  } | null;
+}
+
+export interface ChatMessageItem {
+  id: string;
+  workspaceId: string;
+  userId: string;
+  channel: string;
+  channelId?: string | null;
+  replyToId?: string | null;
+  content: string;
+  attachments?: any;
+  reactions?: Record<string, string[]>;
+  pinned: boolean;
+  isEdited?: boolean;
+  createdAt: string;
+  updatedAt: string;
+  user: {
+    id: string;
+    displayName: string;
+    email: string;
+    avatarUrl?: string | null;
+  };
+  replyTo?: {
+    id: string;
+    content: string;
+    user: { displayName: string };
+  } | null;
+}
+
+export interface CanvasItem {
+  id: string;
+  workspaceId: string;
+  userId: string;
+  title: string;
+  description?: string | null;
+  data: {
+    nodes: Array<{ id: string; type: string; title: string; description?: string; x: number; y: number; color?: string; icon?: string }>;
+    connections: Array<{ from: string; to: string; label?: string }>;
+    notes: Array<{ id: string; text: string; x: number; y: number; color?: string }>;
+  };
+  thumbnail?: string | null;
+  isPublic: boolean;
+  createdAt: string;
+  updatedAt: string;
+  user: {
+    id: string;
+    displayName: string;
+    email: string;
+    avatarUrl?: string | null;
+  };
+}

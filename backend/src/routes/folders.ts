@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { authMiddleware } from '../middleware/auth';
-import { getOrCreateUserWorkspace, verifyWorkspaceMembership } from '../lib/workspace';
+import { resolveWorkspaceContext, verifyWorkspaceMembership } from '../lib/workspace';
 
 const router = Router();
 router.use(authMiddleware);
@@ -10,8 +10,8 @@ router.use(authMiddleware);
 router.get('/', async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.userId!;
-    const ws = await getOrCreateUserWorkspace(userId);
-    const workspaceId = (req.query.workspaceId as string) || ws.workspaceId;
+    const ws = await resolveWorkspaceContext(req);
+    const workspaceId = ws.workspaceId;
 
     const access = await verifyWorkspaceMembership(userId, workspaceId);
     if (!access.allowed) {
@@ -52,8 +52,8 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
 router.post('/', async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.userId!;
-    const ws = await getOrCreateUserWorkspace(userId);
-    const workspaceId = req.body.workspaceId || ws.workspaceId;
+    const ws = await resolveWorkspaceContext(req);
+    const workspaceId = ws.workspaceId;
 
     const access = await verifyWorkspaceMembership(userId, workspaceId);
     if (!access.allowed || access.role === 'VIEWER') {

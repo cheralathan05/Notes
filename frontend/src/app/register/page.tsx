@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AuthLayout from '@/components/auth-layout';
 import {
@@ -16,9 +16,14 @@ import {
 import { useAuth } from '@/context/auth-context';
 import { Shield, ArrowRight, CheckCircle2, UserCheck } from 'lucide-react';
 
-export default function RegisterPage() {
+function RegisterForm() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const emailParam = searchParams.get('email') || '';
+  const redirectParam = searchParams.get('redirect') || '';
+
   const [displayName, setDisplayName] = useState('');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(emailParam);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [acceptedTerms, setAcceptedTerms] = useState(false);
@@ -27,8 +32,13 @@ export default function RegisterPage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [isSuccess, setIsSuccess] = useState(false);
 
+  useEffect(() => {
+    if (emailParam) {
+      setEmail(emailParam);
+    }
+  }, [emailParam]);
+
   const { register } = useAuth();
-  const router = useRouter();
 
   const validateForm = (): boolean => {
     const errors: Record<string, string> = {};
@@ -135,9 +145,24 @@ export default function RegisterPage() {
             </p>
 
             <div className="space-y-2.5 pt-2">
-              <Button fullWidth size="lg" onClick={() => router.push('/dashboard')}>
-                Access Dashboard Workspace
-              </Button>
+              {redirectParam ? (
+                <>
+                  <Button fullWidth size="lg" onClick={() => router.push(redirectParam)}>
+                    Proceed to Invitation & Claim Access →
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/dashboard')}
+                    className="w-full py-2.5 bg-transparent border border-[#2D2D2D] text-[#A3A3A3] hover:text-[#FAFAFA] font-mono text-xs uppercase"
+                  >
+                    Go to Dashboard Instead
+                  </button>
+                </>
+              ) : (
+                <Button fullWidth size="lg" onClick={() => router.push('/dashboard')}>
+                  Access Dashboard Workspace
+                </Button>
+              )}
               <Link href="/login" className="block text-center text-xs font-mono text-[#737373] hover:text-[#FAFAFA] pt-1">
                 RETURN TO SIGN IN
               </Link>
@@ -286,7 +311,7 @@ export default function RegisterPage() {
         <div className="pt-2 text-center text-xs font-mono text-[#737373]">
           ALREADY ENROLLED?{' '}
           <Link
-            href="/login"
+            href={`/login${redirectParam ? `?redirect=${encodeURIComponent(redirectParam)}` : ''}`}
             className="text-[#FAFAFA] font-semibold hover:underline underline-offset-4 ml-1"
           >
             SIGN IN TO KRONOS →
@@ -294,5 +319,19 @@ export default function RegisterPage() {
         </div>
       </div>
     </AuthLayout>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="h-screen w-screen bg-[#080808] flex items-center justify-center font-mono text-xs text-[#737373] animate-pulse">
+          INITIALIZING SECURE ENROLLMENT...
+        </div>
+      }
+    >
+      <RegisterForm />
+    </Suspense>
   );
 }

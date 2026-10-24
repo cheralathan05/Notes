@@ -57,6 +57,21 @@ model User {
   developerTokens         DeveloperToken[]
   claimedTasks            Task[]                    @relation("ClaimedTasks")
   submittedEvidence       TaskEvidence[]
+  sentWorkspaceInvitations WorkspaceInvitation[]   @relation("SentWorkspaceInvitations")
+  workspaceActivities     WorkspaceActivity[]     @relation("UserWorkspaceActivities")
+  commentMentions         CommentMention[]        @relation("UserCommentMentions")
+  collaboratingTasks      TaskCollaborator[]
+  authoredReviews         CodeReview[]            @relation("AuthoredReviews")
+  reviewComments          CodeReviewComment[]
+  reviewActions           CodeReviewAction[]
+  repositoryConnections   RepositoryConnection[]
+  channelMessages         WorkspaceChannelMessage[]
+  createdChannels         WorkspaceChannel[]        @relation("ChannelCreatedBy")
+  channelMemberships      ChannelMember[]
+  canvases                WorkspaceCanvas[]
+  ownedGoals              Goal[]                    @relation("GoalOwner")
+  ownedKeyResults         KeyResult[]               @relation("KeyResultOwner")
+  keyResultUpdates        KeyResultUpdate[]
 
   @@map("users")
 }
@@ -148,6 +163,13 @@ model Workspace {
   automations   Automation[]
   repositories  Repository[]
   developerTokens DeveloperToken[]
+  invitations   WorkspaceInvitation[]
+  activities    WorkspaceActivity[]
+  codeReviews   CodeReview[]
+  repositoryConnections RepositoryConnection[]
+  channelMessages WorkspaceChannelMessage[]
+  channels        WorkspaceChannel[]
+  canvases        WorkspaceCanvas[]
 
   @@map("workspaces")
 }
@@ -373,6 +395,7 @@ model DocumentComment {
   author       User              @relation(fields: [authorId], references: [id], onDelete: Cascade)
   parent       DocumentComment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
   replies      DocumentComment[] @relation("CommentReplies")
+  mentions     CommentMention[]
 
   @@index([documentId])
   @@index([authorId])
@@ -683,6 +706,8 @@ model Task {
   isVerified     Boolean          @default(false) @map("is_verified")
   verifiedAt     DateTime?        @map("verified_at")
   evidence       TaskEvidence[]
+  collaborators  TaskCollaborator[]
+  codeReviews    CodeReview[]
 
   @@index([workspaceId])
   @@index([creatorId])
@@ -810,6 +835,10 @@ enum NotificationType {
   MENTION
   SYSTEM
   AUTOMATION_ALERT
+  WORKSPACE_INVITATION
+  DOCUMENT_SHARED
+  DOCUMENT_COMMENT
+  MEMBER_JOINED
 }
 
 model Notification {
@@ -857,6 +886,8 @@ model FocusSession {
   startedAt     DateTime           @default(now()) @map("started_at")
   endedAt       DateTime?          @map("ended_at")
   notes         String?            @db.Text
+  distractions  Int                @default(0)
+  distractionNotes String?         @map("distraction_notes") @db.Text
   createdAt     DateTime           @default(now()) @map("created_at")
   updatedAt     DateTime           @updatedAt @map("updated_at")
 
@@ -919,14 +950,18 @@ model Goal {
   status       GoalStatus     @default(NOT_STARTED)
   startDate    DateTime?      @map("start_date")
   targetDate   DateTime?      @map("target_date")
+  timePeriod   String?        @map("time_period")
+  ownerId      String?        @map("owner_id")
   projectId    String?        @map("project_id")
   createdAt    DateTime       @default(now()) @map("created_at")
   updatedAt    DateTime       @updatedAt @map("updated_at")
 
   workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   creator      User           @relation("CreatedGoals", fields: [creatorId], references: [id], onDelete: Cascade)
+  owner        User?          @relation("GoalOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   project      Project?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
   checkIns     GoalProgress[]
+  keyResults   KeyResult[]
 
   @@index([workspaceId])
   @@index([creatorId])
@@ -949,6 +984,65 @@ model GoalProgress {
   @@index([goalId])
   @@index([userId])
   @@map("goal_progress_entries")
+}
+
+// ─── Key Results (Measurable OKR Metrics) ──────────────────────────────────
+
+enum KeyResultType {
+  INCREASE
+  DECREASE
+  BINARY
+  MILESTONE
+}
+
+enum KeyResultStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  ACHIEVED
+  AT_RISK
+}
+
+model KeyResult {
+  id           String          @id @default(cuid())
+  goalId       String          @map("goal_id")
+  title        String
+  description  String?         @db.Text
+  type         KeyResultType   @default(INCREASE)
+  startValue   Float           @default(0) @map("start_value")
+  targetValue  Float           @default(100) @map("target_value")
+  currentValue Float           @default(0) @map("current_value")
+  unit         String          @default("%")
+  weight       Float           @default(1.0)
+  status       KeyResultStatus @default(NOT_STARTED)
+  ownerId      String?         @map("owner_id")
+  dueDate      DateTime?       @map("due_date")
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+
+  goal         Goal            @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  owner        User?           @relation("KeyResultOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  updates      KeyResultUpdate[]
+
+  @@index([goalId])
+  @@index([ownerId])
+  @@map("key_results")
+}
+
+model KeyResultUpdate {
+  id            String    @id @default(cuid())
+  keyResultId   String    @map("key_result_id")
+  userId        String    @map("user_id")
+  previousValue Float     @map("previous_value")
+  newValue      Float     @map("new_value")
+  note          String?   @db.Text
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  keyResult     KeyResult @relation(fields: [keyResultId], references: [id], onDelete: Cascade)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([keyResultId])
+  @@index([userId])
+  @@map("key_result_updates")
 }
 
 // ─── Automations & Execution Engine ────────────────────────────────────────
@@ -1041,17 +1135,45 @@ model Repository {
   defaultBranch String    @default("main") @map("default_branch")
   localPath     String?   @map("local_path")
   description   String?
+  status        String    @default("CONNECTED")
+  lastSyncedAt  DateTime? @map("last_synced_at")
+  latestCommit  String?   @map("latest_commit")
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
   workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   project       Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
   tasks         Task[]
+  codeReviews   CodeReview[]
 
   @@unique([workspaceId, slug])
   @@index([workspaceId])
   @@index([projectId])
   @@map("repositories")
+}
+
+model RepositoryConnection {
+  id                    String    @id @default(cuid())
+  workspaceId           String    @map("workspace_id")
+  userId                String    @map("user_id")
+  provider              String    @default("GITHUB")
+  accountName           String    @map("account_name")
+  accountId             String?   @map("account_id")
+  avatarUrl             String?   @map("avatar_url")
+  accessTokenEncrypted  String    @map("access_token_encrypted") @db.Text
+  scopes                String?   @default("repo,read:user")
+  status                String    @default("CONNECTED")
+  lastSyncedAt          DateTime? @map("last_synced_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  workspace             Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, provider])
+  @@index([workspaceId])
+  @@index([userId])
+  @@map("repository_connections")
 }
 
 enum EvidenceStatus {
@@ -1082,5 +1204,254 @@ model TaskEvidence {
   @@map("task_evidence")
 }
 
+// ─── Workspace Collaboration & Mentions Models ──────────────────────────────
+
+model WorkspaceInvitation {
+  id             String           @id @default(cuid())
+  workspaceId    String           @map("workspace_id")
+  inviterId      String           @map("inviter_id")
+  recipientEmail String           @map("recipient_email")
+  role           WorkspaceRole    @default(MEMBER)
+  tokenHash      String           @unique @map("token_hash")
+  status         InvitationStatus @default(PENDING)
+  message        String?
+  expiresAt      DateTime         @map("expires_at")
+  acceptedAt     DateTime?        @map("accepted_at")
+  revokedAt      DateTime?        @map("revoked_at")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  workspace      Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  inviter        User             @relation("SentWorkspaceInvitations", fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([recipientEmail])
+  @@index([tokenHash])
+  @@index([status])
+  @@map("workspace_invitations")
+}
+
+model WorkspaceActivity {
+  id          String    @id @default(cuid())
+  workspaceId String    @map("workspace_id")
+  userId      String?   @map("user_id")
+  action      String
+  entityType  String    @default("WORKSPACE") @map("entity_type")
+  entityId    String?   @map("entity_id")
+  metadata    Json?
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User?     @relation("UserWorkspaceActivities", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([action])
+  @@map("workspace_activities")
+}
+
+model CommentMention {
+  id        String          @id @default(cuid())
+  commentId String          @map("comment_id")
+  userId    String          @map("user_id")
+  createdAt DateTime        @default(now()) @map("created_at")
+
+  comment   DocumentComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user      User            @relation("UserCommentMentions", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([commentId, userId])
+  @@index([commentId])
+  @@index([userId])
+  @@map("comment_mentions")
+}
+
+// ─── Team Collaboration & Code Reviews Models ─────────────────────────────
+
+model TaskCollaborator {
+  id         String   @id @default(cuid())
+  taskId     String   @map("task_id")
+  userId     String   @map("user_id")
+  assignedAt DateTime @default(now()) @map("assigned_at")
+
+  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, userId])
+  @@index([taskId])
+  @@index([userId])
+  @@map("task_collaborators")
+}
+
+enum ReviewStatus {
+  DRAFT
+  OPEN
+  REVIEW_REQUESTED
+  CHANGES_REQUESTED
+  APPROVED
+  MERGED
+  CLOSED
+}
+
+enum ReviewActionType {
+  APPROVE
+  REQUEST_CHANGES
+  COMMENT
+  CLOSE
+  REOPEN
+}
+
+model CodeReview {
+  id             String       @id @default(cuid())
+  workspaceId    String       @map("workspace_id")
+  repositoryId   String       @map("repository_id")
+  taskId         String?      @map("task_id")
+  authorId       String       @map("author_id")
+  title          String
+  description    String?      @db.Text
+  sourceBranch   String       @map("source_branch")
+  targetBranch   String       @default("main") @map("target_branch")
+  status         ReviewStatus @default(OPEN)
+  commitHash     String?      @map("commit_hash")
+  pullRequestUrl String?      @map("pull_request_url")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  repository     Repository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  task           Task?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  author         User         @relation("AuthoredReviews", fields: [authorId], references: [id], onDelete: Cascade)
+  comments       CodeReviewComment[]
+  actions        CodeReviewAction[]
+
+  @@index([workspaceId])
+  @@index([repositoryId])
+  @@index([taskId])
+  @@index([authorId])
+  @@index([status])
+  @@map("code_reviews")
+}
+
+model CodeReviewComment {
+  id         String     @id @default(cuid())
+  reviewId   String     @map("review_id")
+  userId     String     @map("user_id")
+  filePath   String?    @map("file_path")
+  lineNumber Int?       @map("line_number")
+  content    String     @db.Text
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
+
+  review     CodeReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([reviewId])
+  @@index([userId])
+  @@map("code_review_comments")
+}
+
+model CodeReviewAction {
+  id        String           @id @default(cuid())
+  reviewId  String           @map("review_id")
+  userId    String           @map("user_id")
+  action    ReviewActionType
+  summary   String?          @db.Text
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  review    CodeReview       @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([reviewId])
+  @@index([userId])
+  @@map("code_review_actions")
+}
 
 
+
+// ─── Workspace Channel Messages & Chat ──────────────────────────────────────
+
+model WorkspaceChannelMessage {
+  id          String    @id @default(cuid())
+  workspaceId String    @map("workspace_id")
+  userId      String    @map("user_id")
+  channel     String    @default("general")
+  channelId   String?   @map("channel_id")
+  replyToId   String?   @map("reply_to_id")
+  content     String    @db.Text
+  attachments Json?
+  reactions   Json?
+  pinned      Boolean   @default(false)
+  isEdited    Boolean   @default(false) @map("is_edited")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channelRef  WorkspaceChannel? @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  replyTo     WorkspaceChannelMessage?  @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies     WorkspaceChannelMessage[] @relation("MessageReplies")
+
+  @@index([workspaceId, channel])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("workspace_channel_messages")
+}
+
+model WorkspaceChannel {
+  id          String    @id @default(cuid())
+  workspaceId String    @map("workspace_id")
+  name        String
+  topic       String?
+  description String?
+  isPrivate   Boolean   @default(false) @map("is_private")
+  isArchived  Boolean   @default(false) @map("is_archived")
+  createdById String?   @map("created_by_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy   User?           @relation("ChannelCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  members     ChannelMember[]
+  messages    WorkspaceChannelMessage[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+  @@map("workspace_channels")
+}
+
+model ChannelMember {
+  id        String   @id @default(cuid())
+  channelId String   @map("channel_id")
+  userId    String   @map("user_id")
+  role      String   @default("MEMBER")
+  joinedAt  DateTime @default(now()) @map("joined_at")
+
+  channel   WorkspaceChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@index([userId])
+  @@map("channel_members")
+}
+
+// ─── Workspace Visual Canvas / Whiteboard ─────────────────────────────────
+
+model WorkspaceCanvas {
+  id          String    @id @default(cuid())
+  workspaceId String    @map("workspace_id")
+  userId      String    @map("user_id")
+  title       String    @default("System Architecture Canvas")
+  description String?
+  data        Json
+  thumbnail   String?   @db.Text
+  isPublic    Boolean   @default(false) @map("is_public")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([userId])
+  @@map("workspace_canvases")
+}

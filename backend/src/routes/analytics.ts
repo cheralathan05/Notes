@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { authMiddleware } from '../middleware/auth';
-import { getOrCreateUserWorkspace } from '../lib/workspace';
+import { resolveWorkspaceContext } from '../lib/workspace';
 import { analyticsService } from '../lib/analytics-service';
 
 const router = Router();
@@ -10,7 +10,7 @@ router.use(authMiddleware);
 router.get('/command-center', async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.userId!;
-    const ws = await getOrCreateUserWorkspace(userId);
+    const ws = await resolveWorkspaceContext(req);
 
     const data = await analyticsService.getDailyCommandCenter(ws.workspaceId, userId);
 
@@ -30,10 +30,13 @@ router.get('/command-center', async (req: Request, res: Response): Promise<void>
 // ─── GET /api/analytics/workspace ────────────────────────────────────────────
 router.get('/workspace', async (req: Request, res: Response): Promise<void> => {
   try {
-    const userId = req.userId!;
-    const ws = await getOrCreateUserWorkspace(userId);
+    const ws = await resolveWorkspaceContext(req);
+    const { projectId, dateRange } = req.query;
 
-    const data = await analyticsService.getWorkspaceAnalytics(ws.workspaceId);
+    const data = await analyticsService.getWorkspaceAnalytics(ws.workspaceId, {
+      projectId: typeof projectId === 'string' && projectId !== 'ALL' ? projectId : undefined,
+      dateRange: typeof dateRange === 'string' ? dateRange : undefined,
+    });
 
     res.json({
       success: true,

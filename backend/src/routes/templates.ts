@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { authMiddleware } from '../middleware/auth';
-import { getOrCreateUserWorkspace, verifyWorkspaceMembership } from '../lib/workspace';
+import { resolveWorkspaceContext, verifyWorkspaceMembership } from '../lib/workspace';
 import { BUILTIN_TEMPLATES } from '../lib/templates-data';
 
 const router = Router();
@@ -48,8 +48,8 @@ async function ensureSystemTemplatesSeeded() {
 router.get('/', async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.userId!;
-    const ws = await getOrCreateUserWorkspace(userId);
-    const workspaceId = (req.query.workspaceId as string) || ws.workspaceId;
+    const ws = await resolveWorkspaceContext(req);
+    const workspaceId = ws.workspaceId;
 
     await ensureSystemTemplatesSeeded();
 
@@ -178,7 +178,7 @@ router.post('/:id/use', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const ws = await getOrCreateUserWorkspace(userId);
+    const ws = await resolveWorkspaceContext(req);
     const docTitle = title && typeof title === 'string' && title.trim().length > 0
       ? title.trim()
       : template.name;
@@ -381,7 +381,7 @@ router.post('/:id/duplicate', async (req: Request, res: Response): Promise<void>
   try {
     const userId = req.userId!;
     const id = req.params.id as string;
-    const ws = await getOrCreateUserWorkspace(userId);
+    const ws = await resolveWorkspaceContext(req);
 
     const source = await prisma.documentTemplate.findUnique({ where: { id } });
     if (!source) {

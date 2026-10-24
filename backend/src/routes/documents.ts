@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { authMiddleware } from '../middleware/auth';
-import { getOrCreateUserWorkspace, verifyWorkspaceMembership } from '../lib/workspace';
+import { getOrCreateUserWorkspace, verifyWorkspaceMembership, resolveWorkspaceContext } from '../lib/workspace';
 import { verifyDocumentPermission } from '../lib/document-auth';
 
 const router = Router();
@@ -27,8 +27,8 @@ function extractPlainText(content: any): string {
 router.get('/', async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.userId!;
-    const ws = await getOrCreateUserWorkspace(userId);
-    const workspaceId = (req.query.workspaceId as string) || ws.workspaceId;
+    const ws = await resolveWorkspaceContext(req);
+    const workspaceId = ws.workspaceId;
 
     const access = await verifyWorkspaceMembership(userId, workspaceId);
     if (!access.allowed) {
@@ -52,50 +52,68 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
       order = 'desc',
     } = req.query;
 
-    const where: any = {
-      workspaceId,
-      isDeleted: isTrash === 'true',
-    };
+    const viewSharedOnly = req.query.shared === 'true';
+
+    // Access scope: either user's current workspace or documents shared with them
+    const accessFilter = viewSharedOnly
+      ? { memberships: { some: { userId } }, creatorId: { not: userId } }
+      : {
+          OR: [
+            { workspaceId },
+            { memberships: { some: { userId } } },
+          ],
+        };
+
+    const andConditions: any[] = [
+      accessFilter,
+      { isDeleted: isTrash === 'true' },
+    ];
 
     if (isTrash !== 'true') {
       if (isArchived === 'true') {
-        where.isArchived = true;
+        andConditions.push({ isArchived: true });
       } else {
-        where.isArchived = false;
+        andConditions.push({ isArchived: false });
       }
 
       if (isFavorite === 'true') {
-        where.isFavorite = true;
+        andConditions.push({ isFavorite: true });
       }
 
       if (folderId !== undefined) {
-        where.folderId = folderId === 'root' ? null : (folderId as string);
+        andConditions.push({ folderId: folderId === 'root' ? null : (folderId as string) });
       }
 
       if (parentId !== undefined) {
-        where.parentId = parentId === 'root' ? null : (parentId as string);
+        andConditions.push({ parentId: parentId === 'root' ? null : (parentId as string) });
       }
 
       if (status) {
-        where.status = status as any;
+        andConditions.push({ status: status as any });
       }
 
       if (tag) {
-        where.tags = {
-          some: {
-            tag: { name: tag as string },
+        andConditions.push({
+          tags: {
+            some: {
+              tag: { name: tag as string },
+            },
           },
-        };
+        });
       }
     }
 
     if (search && typeof search === 'string' && search.trim().length > 0) {
       const q = search.trim();
-      where.OR = [
-        { title: { contains: q, mode: 'insensitive' } },
-        { plainText: { contains: q, mode: 'insensitive' } },
-      ];
+      andConditions.push({
+        OR: [
+          { title: { contains: q, mode: 'insensitive' } },
+          { plainText: { contains: q, mode: 'insensitive' } },
+        ],
+      });
     }
+
+    const where: any = { AND: andConditions };
 
     const orderBy: any = {};
     if (sort === 'title') {
@@ -169,7 +187,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
 router.post('/', async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.userId!;
-    const ws = await getOrCreateUserWorkspace(userId);
+    const ws = await resolveWorkspaceContext(req);
     const workspaceId = req.body.workspaceId || ws.workspaceId;
 
     const access = await verifyWorkspaceMembership(userId, workspaceId);
@@ -355,8 +373,8 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-// ─── PATCH /api/documents/:id (Update document with OCC) ──────────────────────
-router.patch('/:id', async (req: Request, res: Response): Promise<void> => {
+// ─── PATCH / PUT /api/documents/:id (Update document with OCC) ───────────────
+const handleUpdateDocument = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.userId!;
     const id = req.params.id as string;
@@ -492,7 +510,10 @@ router.patch('/:id', async (req: Request, res: Response): Promise<void> => {
       error: { code: 'INTERNAL_ERROR', message: 'Failed to update document' },
     });
   }
-});
+};
+
+router.patch('/:id', handleUpdateDocument);
+router.put('/:id', handleUpdateDocument);
 
 // ─── DELETE /api/documents/:id (Soft delete to trash) ────────────────────────
 router.delete('/:id', async (req: Request, res: Response): Promise<void> => {
@@ -749,7 +770,7 @@ router.post('/bulk', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const ws = await getOrCreateUserWorkspace(userId);
+    const ws = await resolveWorkspaceContext(req);
     const workspaceId = ws.workspaceId;
 
     if (action === 'trash') {

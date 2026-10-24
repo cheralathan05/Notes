@@ -252,10 +252,30 @@ export class AnalyticsService {
   /**
    * Calculate workspace analytics and health metrics from database records
    */
-  async getWorkspaceAnalytics(workspaceId: string) {
+  async getWorkspaceAnalytics(workspaceId: string, options?: { projectId?: string; dateRange?: string }) {
     const now = new Date();
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+
+    let dateFilter: any = undefined;
+    if (options?.dateRange === '7d') {
+      dateFilter = { gte: sevenDaysAgo };
+    } else if (options?.dateRange === '30d') {
+      dateFilter = { gte: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) };
+    } else if (options?.dateRange === '90d') {
+      dateFilter = { gte: new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000) };
+    }
+
+    const taskWhere: any = {
+      workspaceId,
+      isArchived: false,
+    };
+    if (options?.projectId) {
+      taskWhere.projectId = options.projectId;
+    }
+    if (dateFilter) {
+      taskWhere.createdAt = dateFilter;
+    }
 
     const [
       allTasks,
@@ -265,9 +285,10 @@ export class AnalyticsService {
       goals,
     ] = await Promise.all([
       prisma.task.findMany({
-        where: { workspaceId, isArchived: false },
+        where: taskWhere,
         select: {
           id: true,
+          projectId: true,
           status: true,
           priority: true,
           dueDate: true,
@@ -278,6 +299,7 @@ export class AnalyticsService {
       prisma.task.count({
         where: {
           workspaceId,
+          ...(options?.projectId ? { projectId: options.projectId } : {}),
           status: 'DONE',
           completedAt: { gte: sevenDaysAgo },
         },
@@ -285,6 +307,7 @@ export class AnalyticsService {
       prisma.task.count({
         where: {
           workspaceId,
+          ...(options?.projectId ? { projectId: options.projectId } : {}),
           status: 'DONE',
           completedAt: { gte: fourteenDaysAgo, lt: sevenDaysAgo },
         },
@@ -299,17 +322,26 @@ export class AnalyticsService {
       }),
     ]);
 
+    // 1. Completion Rate:
+    // Eligible tasks exclude CANCELLED tasks as required by the business rules
     const totalTasks = allTasks.length;
-    const completedTasks = allTasks.filter((t) => t.status === 'DONE');
-    const completionRate = totalTasks > 0 ? Math.round((completedTasks.length / totalTasks) * 100) : 0;
+    const eligibleTasks = allTasks.filter((t) => t.status !== 'CANCELLED');
+    const completedTasks = eligibleTasks.filter((t) => t.status === 'DONE');
+    const completionRate = eligibleTasks.length > 0
+      ? Math.round((completedTasks.length / eligibleTasks.length) * 100)
+      : 0;
 
-    // Overdue rate
-    const overdueTasks = allTasks.filter(
-      (t) => t.status !== 'DONE' && t.status !== 'CANCELLED' && t.dueDate && new Date(t.dueDate) < now
+    // 2. Overdue Ratio:
+    // Denominator = eligible tasks with valid due dates
+    const tasksWithDueDates = eligibleTasks.filter((t) => t.dueDate !== null);
+    const overdueTasks = tasksWithDueDates.filter(
+      (t) => t.status !== 'DONE' && new Date(t.dueDate!) < now
     );
-    const overdueRate = totalTasks > 0 ? Math.round((overdueTasks.length / totalTasks) * 100) : 0;
+    const overdueRate = tasksWithDueDates.length > 0
+      ? Math.round((overdueTasks.length / tasksWithDueDates.length) * 100)
+      : 0;
 
-    // Cycle time average (in hours)
+    // 3. Average Cycle Time (hours):
     let totalCycleHours = 0;
     let cycleCount = 0;
     for (const t of completedTasks) {
@@ -323,7 +355,29 @@ export class AnalyticsService {
     }
     const averageCycleHours = cycleCount > 0 ? Number((totalCycleHours / cycleCount).toFixed(1)) : 0;
 
-    // Status breakdown
+    // 4. Delivery Velocity:
+    const velocityTrend = last7DaysCompleted - prev7DaysCompleted;
+    const velocityPercentageChange = prev7DaysCompleted > 0
+      ? Math.round(((last7DaysCompleted - prev7DaysCompleted) / prev7DaysCompleted) * 100)
+      : last7DaysCompleted > 0 ? 100 : 0;
+
+    // 5. Daily Trend (last 7 days):
+    const dailyTrend: Array<{ date: string; dayName: string; completed: number }> = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+      const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+      const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+      const completedOnDay = allTasks.filter(
+        (t) => t.status === 'DONE' && t.completedAt && new Date(t.completedAt) >= dayStart && new Date(t.completedAt) <= dayEnd
+      ).length;
+      dailyTrend.push({
+        date: dayStart.toISOString().split('T')[0],
+        dayName: dayStart.toLocaleDateString('en-US', { weekday: 'short' }),
+        completed: completedOnDay,
+      });
+    }
+
+    // 6. Workflow Status distribution:
     const statusCounts = {
       BACKLOG: allTasks.filter((t) => t.status === 'BACKLOG').length,
       TODO: allTasks.filter((t) => t.status === 'TODO').length,
@@ -333,16 +387,32 @@ export class AnalyticsService {
       CANCELLED: allTasks.filter((t) => t.status === 'CANCELLED').length,
     };
 
-    // Priority breakdown
+    // 7. Priority distribution:
     const priorityCounts = {
       URGENT: allTasks.filter((t) => t.priority === 'URGENT').length,
       HIGH: allTasks.filter((t) => t.priority === 'HIGH').length,
       MEDIUM: allTasks.filter((t) => t.priority === 'MEDIUM').length,
       LOW: allTasks.filter((t) => t.priority === 'LOW').length,
-      NONE: allTasks.filter((t) => t.priority === 'NONE').length,
+      NONE: allTasks.filter((t) => t.priority === 'NONE' || !t.priority).length,
     };
 
-    // Goals average progress
+    // 8. Project Execution:
+    const projectsExecution = projects.map((p) => {
+      const pTasks = allTasks.filter((t) => (t as any).projectId === p.id);
+      const pDone = pTasks.filter((t) => t.status === 'DONE').length;
+      const pOverdue = pTasks.filter((t) => t.status !== 'DONE' && t.dueDate && new Date(t.dueDate) < now).length;
+      return {
+        id: p.id,
+        name: p.name,
+        health: p.health,
+        progress: p.progress,
+        totalTasks: pTasks.length,
+        doneTasks: pDone,
+        overdueTasks: pOverdue,
+      };
+    });
+
+    // 9. Goals Metric:
     let totalGoalProgress = 0;
     for (const g of goals) {
       const pct = g.targetValue > 0 ? Math.min(100, (g.currentValue / g.targetValue) * 100) : 0;
@@ -353,15 +423,19 @@ export class AnalyticsService {
     return {
       summary: {
         totalTasks,
+        eligibleTasksCount: eligibleTasks.length,
         completedTasks: completedTasks.length,
         completionRate,
+        tasksWithDueDatesCount: tasksWithDueDates.length,
         overdueCount: overdueTasks.length,
         overdueRate,
         averageCycleHours,
         velocityLast7Days: last7DaysCompleted,
         velocityPrevious7Days: prev7DaysCompleted,
-        velocityTrend: last7DaysCompleted - prev7DaysCompleted,
+        velocityTrend,
+        velocityPercentageChange,
       },
+      dailyTrend,
       statusDistribution: statusCounts,
       priorityDistribution: priorityCounts,
       projectsHealth: {
@@ -370,6 +444,7 @@ export class AnalyticsService {
         offTrack: projects.filter((p) => p.health === 'OFF_TRACK').length,
         total: projects.length,
       },
+      projectsExecution,
       goalsMetric: {
         total: goals.length,
         achieved: goals.filter((g) => g.status === 'ACHIEVED').length,

@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { authMiddleware } from '../middleware/auth';
-import { getOrCreateUserWorkspace } from '../lib/workspace';
+import { extractRequestedWorkspaceId, getOrCreateUserWorkspace } from '../lib/workspace';
 import { notificationsService } from '../lib/notifications-service';
 
 const router = Router();
@@ -10,10 +10,14 @@ router.use(authMiddleware);
 router.get('/', async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.userId!;
-    const ws = await getOrCreateUserWorkspace(userId);
-    const { unreadOnly, limit, offset } = req.query;
+    const requestedWsId = extractRequestedWorkspaceId(req);
+    const ws = await getOrCreateUserWorkspace(userId, requestedWsId);
+    const { unreadOnly, limit, offset, allWorkspaces } = req.query;
 
-    const data = await notificationsService.getUserNotifications(ws.workspaceId, userId, {
+    // By default, if allWorkspaces is requested or no workspace param is passed, we can fetch all or current
+    const targetWsId = allWorkspaces === 'true' ? undefined : ws.workspaceId;
+
+    const data = await notificationsService.getUserNotifications(targetWsId, userId, {
       unreadOnly: unreadOnly === 'true',
       limit: limit ? parseInt(String(limit), 10) : 20,
       offset: offset ? parseInt(String(offset), 10) : 0,
@@ -57,7 +61,8 @@ router.patch('/:id/read', async (req: Request, res: Response): Promise<void> => 
 router.post('/mark-all-read', async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.userId!;
-    const ws = await getOrCreateUserWorkspace(userId);
+    const requestedWsId = extractRequestedWorkspaceId(req);
+    const ws = await getOrCreateUserWorkspace(userId, requestedWsId);
 
     const result = await notificationsService.markAllAsRead(ws.workspaceId, userId);
 

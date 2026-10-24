@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import Link from 'next/link';
 import AppShell from '@/components/app-shell';
 import { Card, Button, Badge } from '@/components/ui';
 import {
@@ -8,6 +9,7 @@ import {
   WorkspaceAnalyticsData,
   GoalItem,
   TimeEntryItem,
+  ProjectItem,
 } from '@/lib/api';
 import {
   BarChart3,
@@ -23,13 +25,23 @@ import {
   X,
   Layers,
   Activity,
+  Filter,
+  RefreshCw,
+  Folder,
+  ArrowRight,
+  ExternalLink,
 } from 'lucide-react';
 
 export default function AnalyticsPage() {
   const [analytics, setAnalytics] = useState<WorkspaceAnalyticsData | null>(null);
   const [goals, setGoals] = useState<GoalItem[]>([]);
   const [timeEntries, setTimeEntries] = useState<TimeEntryItem[]>([]);
+  const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Filters state
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('ALL');
+  const [selectedDateRange, setSelectedDateRange] = useState<'all' | '7d' | '30d' | '90d'>('all');
 
   // New Goal modal
   const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
@@ -47,11 +59,16 @@ export default function AnalyticsPage() {
   const [isSubmittingCheckIn, setIsSubmittingCheckIn] = useState(false);
 
   const loadData = useCallback(async () => {
+    setLoading(true);
     try {
-      const [analyticsRes, goalsRes, timeRes] = await Promise.all([
-        api.getWorkspaceAnalytics(),
+      const [analyticsRes, goalsRes, timeRes, projectsRes] = await Promise.all([
+        api.getWorkspaceAnalytics({
+          projectId: selectedProjectId !== 'ALL' ? selectedProjectId : undefined,
+          dateRange: selectedDateRange,
+        }),
         api.getGoals(),
         api.getTimeEntries(),
+        api.getProjects().catch(() => ({ success: false, data: { projects: [] } })),
       ]);
 
       if (analyticsRes.success && analyticsRes.data) {
@@ -63,12 +80,15 @@ export default function AnalyticsPage() {
       if (timeRes.success && timeRes.data?.entries) {
         setTimeEntries(timeRes.data.entries);
       }
+      if (projectsRes.success && projectsRes.data?.projects) {
+        setProjects(projectsRes.data.projects);
+      }
     } catch (err) {
       console.error('Failed to load analytics data:', err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedProjectId, selectedDateRange]);
 
   useEffect(() => {
     loadData();
@@ -124,29 +144,113 @@ export default function AnalyticsPage() {
   };
 
   const summary = analytics?.summary;
+  const maxDailyTrend = useMemo(() => {
+    if (!analytics?.dailyTrend || analytics.dailyTrend.length === 0) return 1;
+    return Math.max(1, ...analytics.dailyTrend.map((d) => d.completed));
+  }, [analytics?.dailyTrend]);
 
   return (
     <AppShell
       headerTitle="Analytics & Strategic Intelligence"
-      headerSubtitle="Real-time execution velocity, cycle times, OKRs, and time distribution"
+      headerSubtitle="Real-time execution velocity, cycle times, OKRs, and workflow distribution"
     >
-      <div className="space-y-8 animate-fade-in font-sans">
+      <div className="space-y-6 animate-fade-in font-sans">
+        
+        {/* ─── Filter & Control Bar ─── */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-[#101010] border border-[#222222] rounded-[var(--radius-sm)] text-xs font-mono">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-1.5 text-[#737373]">
+              <Filter className="w-3.5 h-3.5 text-[#A3A3A3]" />
+              <span>PROJECT:</span>
+            </div>
+            <select
+              value={selectedProjectId}
+              onChange={(e) => setSelectedProjectId(e.target.value)}
+              className="bg-[#181818] border border-[#333333] text-[#FAFAFA] rounded-[2px] px-2.5 py-1 focus:outline-none focus:border-[#FAFAFA]"
+            >
+              <option value="ALL">All Projects ({projects.length})</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+
+            <div className="flex items-center gap-1.5 text-[#737373] ml-1">
+              <Calendar className="w-3.5 h-3.5 text-[#A3A3A3]" />
+              <span>RANGE:</span>
+            </div>
+            <div className="flex items-center gap-1">
+              {(
+                [
+                  { id: 'all', label: 'All Time' },
+                  { id: '7d', label: 'Last 7d' },
+                  { id: '30d', label: 'Last 30d' },
+                  { id: '90d', label: 'Last 90d' },
+                ] as const
+              ).map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => setSelectedDateRange(r.id)}
+                  className={`px-2 py-0.5 rounded-[2px] text-[11px] transition-colors ${
+                    selectedDateRange === r.id
+                      ? 'bg-[#FAFAFA] text-black font-bold'
+                      : 'bg-[#181818] text-[#A3A3A3] hover:text-[#FAFAFA] border border-[#2B2B2B]'
+                  }`}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {(selectedProjectId !== 'ALL' || selectedDateRange !== 'all') && (
+              <button
+                onClick={() => {
+                  setSelectedProjectId('ALL');
+                  setSelectedDateRange('all');
+                }}
+                className="text-[11px] text-[#A3A3A3] hover:text-white underline"
+              >
+                Reset Filters
+              </button>
+            )}
+            <button
+              onClick={() => loadData()}
+              title="Refresh telemetry metrics"
+              className="px-2.5 py-1 bg-[#181818] hover:bg-[#222222] border border-[#333333] text-[#FAFAFA] rounded-[2px] flex items-center gap-1.5 transition-colors"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">Refresh</span>
+            </button>
+          </div>
+        </div>
+
         {/* ─── Hero KPI Cards ─── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 font-mono">
-          <Card className="p-5 space-y-2 bg-[#101010]">
-            <div className="flex items-center justify-between text-xs text-[#737373]">
-              <span>COMPLETION RATE</span>
-              <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-            </div>
-            <div className="text-3xl font-bold text-[#FAFAFA]">
-              {summary?.completionRate ?? 0}%
-            </div>
-            <p className="text-[11px] text-[#737373]">
-              {summary?.completedTasks ?? 0} of {summary?.totalTasks ?? 0} tasks resolved
-            </p>
-          </Card>
+          {/* 1. Completion Rate */}
+          <Link
+            href="/tasks?status=DONE"
+            className="group block"
+            title="Click to view completed tasks in Tasks & Issues"
+          >
+            <Card className="p-5 space-y-2 bg-[#101010] border-[#222222] group-hover:border-[#444444] transition-colors">
+              <div className="flex items-center justify-between text-xs text-[#737373]">
+                <span className="group-hover:text-[#FAFAFA] transition-colors">COMPLETION RATE</span>
+                <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+              </div>
+              <div className="text-3xl font-bold text-[#FAFAFA]">
+                {summary?.completionRate ?? 0}%
+              </div>
+              <p className="text-[11px] text-[#737373]">
+                {summary?.completedTasks ?? 0} of {summary?.eligibleTasksCount ?? summary?.totalTasks ?? 0} eligible tasks resolved
+              </p>
+            </Card>
+          </Link>
 
-          <Card className="p-5 space-y-2 bg-[#101010]">
+          {/* 2. Average Cycle Time */}
+          <Card className="p-5 space-y-2 bg-[#101010] border-[#222222]">
             <div className="flex items-center justify-between text-xs text-[#737373]">
               <span>AVG CYCLE TIME</span>
               <Clock className="h-4 w-4 text-[#FAFAFA]" />
@@ -154,45 +258,107 @@ export default function AnalyticsPage() {
             <div className="text-3xl font-bold text-[#FAFAFA]">
               {summary?.averageCycleHours ?? 0}h
             </div>
-            <p className="text-[11px] text-[#737373]">From creation to DONE status</p>
+            <p className="text-[11px] text-[#737373]">
+              {(summary?.averageCycleHours ?? 0) === 0
+                ? 'No resolved tasks with timestamps'
+                : 'From task creation to DONE status'}
+            </p>
           </Card>
 
-          <Card className="p-5 space-y-2 bg-[#101010]">
-            <div className="flex items-center justify-between text-xs text-[#737373]">
-              <span>7-DAY VELOCITY</span>
-              <TrendingUp className="h-4 w-4 text-amber-400" />
-            </div>
-            <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-bold text-[#FAFAFA]">
-                {summary?.velocityLast7Days ?? 0}
-              </span>
-              <span
-                className={`text-xs flex items-center ${
-                  (summary?.velocityTrend ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'
-                }`}
-              >
-                {(summary?.velocityTrend ?? 0) >= 0 ? (
-                  <ArrowUpRight className="h-3.5 w-3.5" />
-                ) : (
-                  <ArrowDownRight className="h-3.5 w-3.5" />
-                )}
-                {summary?.velocityTrend ?? 0} vs prev week
-              </span>
-            </div>
-            <p className="text-[11px] text-[#737373]">Tasks closed in rolling 7 days</p>
-          </Card>
+          {/* 3. 7-Day Velocity */}
+          <Link
+            href="/tasks?status=DONE"
+            className="group block"
+            title="Click to view resolved tasks"
+          >
+            <Card className="p-5 space-y-2 bg-[#101010] border-[#222222] group-hover:border-[#444444] transition-colors">
+              <div className="flex items-center justify-between text-xs text-[#737373]">
+                <span className="group-hover:text-[#FAFAFA] transition-colors">7-DAY VELOCITY</span>
+                <TrendingUp className="h-4 w-4 text-amber-400" />
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-bold text-[#FAFAFA]">
+                  {summary?.velocityLast7Days ?? 0}
+                </span>
+                <span
+                  className={`text-xs flex items-center font-bold ${
+                    (summary?.velocityTrend ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'
+                  }`}
+                >
+                  {(summary?.velocityTrend ?? 0) >= 0 ? (
+                    <ArrowUpRight className="h-3.5 w-3.5" />
+                  ) : (
+                    <ArrowDownRight className="h-3.5 w-3.5" />
+                  )}
+                  {(summary?.velocityTrend ?? 0) >= 0 ? '+' : ''}
+                  {summary?.velocityTrend ?? 0} ({summary?.velocityPercentageChange ?? 0}%)
+                </span>
+              </div>
+              <p className="text-[11px] text-[#737373]">
+                vs {summary?.velocityPrevious7Days ?? 0} closed in prior 7 days
+              </p>
+            </Card>
+          </Link>
 
-          <Card className="p-5 space-y-2 bg-[#101010]">
-            <div className="flex items-center justify-between text-xs text-[#737373]">
-              <span>OVERDUE RATIO</span>
-              <AlertTriangle className="h-4 w-4 text-red-400" />
-            </div>
-            <div className="text-3xl font-bold text-red-400">
-              {summary?.overdueRate ?? 0}%
-            </div>
-            <p className="text-[11px] text-[#737373]">{summary?.overdueCount ?? 0} tasks currently overdue</p>
-          </Card>
+          {/* 4. Overdue Ratio */}
+          <Link
+            href="/tasks?overdue=true"
+            className="group block"
+            title="Click to view overdue tasks"
+          >
+            <Card className="p-5 space-y-2 bg-[#101010] border-[#222222] group-hover:border-[#444444] transition-colors">
+              <div className="flex items-center justify-between text-xs text-[#737373]">
+                <span className="group-hover:text-[#FAFAFA] transition-colors">OVERDUE RATIO</span>
+                <AlertTriangle className="h-4 w-4 text-red-400" />
+              </div>
+              <div className="text-3xl font-bold text-red-400">
+                {summary?.overdueRate ?? 0}%
+              </div>
+              <p className="text-[11px] text-[#737373]">
+                {summary?.overdueCount ?? 0} of {summary?.tasksWithDueDatesCount ?? summary?.totalTasks ?? 0} tasks with deadlines overdue
+              </p>
+            </Card>
+          </Link>
         </div>
+
+        {/* ─── 7-Day Delivery Velocity Trend Chart ─── */}
+        {analytics?.dailyTrend && analytics.dailyTrend.length > 0 && (
+          <Card className="p-5 space-y-3 bg-[#111111] border-[#2D2D2D]">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 font-mono text-xs text-[#FAFAFA]">
+                <TrendingUp className="h-4 w-4 text-amber-400" />
+                <span className="font-semibold uppercase tracking-wider">
+                  DAILY TASK RESOLUTION (LAST 7 DAYS)
+                </span>
+              </div>
+              <span className="font-mono text-xs text-[#737373]">
+                Total: {summary?.velocityLast7Days ?? 0} tasks completed
+              </span>
+            </div>
+
+            <div className="grid grid-cols-7 gap-2 pt-2 items-end h-28 font-mono">
+              {analytics.dailyTrend.map((d) => {
+                const heightPercent = Math.max(12, Math.round((d.completed / maxDailyTrend) * 100));
+                return (
+                  <div key={d.date} className="flex flex-col items-center gap-1.5 h-full justify-end">
+                    <span className="text-[10px] font-bold text-white font-mono">
+                      {d.completed > 0 ? d.completed : '0'}
+                    </span>
+                    <div className="w-full bg-[#181818] h-16 rounded-[2px] flex items-end overflow-hidden">
+                      <div
+                        className="w-full bg-neutral-200 hover:bg-white transition-all rounded-[1px]"
+                        style={{ height: `${d.completed > 0 ? heightPercent : 4}%` }}
+                      />
+                    </div>
+                    <span className="text-[10px] text-[#737373] uppercase tracking-wider">
+                      {d.dayName}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        )}
 
         {/* ─── Workflow Distributions ─── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -203,6 +369,7 @@ export default function AnalyticsPage() {
                 <Layers className="h-4 w-4 text-[#FAFAFA]" />
                 <span className="font-semibold uppercase tracking-wider">WORKFLOW STATUS DISTRIBUTION</span>
               </div>
+              <span className="text-[10px] text-[#737373] font-mono">CLICK TO FILTER</span>
             </div>
 
             <div className="space-y-3 font-mono">
@@ -211,18 +378,29 @@ export default function AnalyticsPage() {
                   const total = summary?.totalTasks || 1;
                   const pct = Math.round((count / total) * 100);
                   return (
-                    <div key={status} className="space-y-1">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-[#A3A3A3]">{status}</span>
-                        <span className="text-[#FAFAFA] font-bold">{count} ({pct}%)</span>
+                    <Link
+                      key={status}
+                      href={`/tasks?status=${status}`}
+                      className="block group"
+                      title={`Filter tasks by ${status}`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-[#A3A3A3] group-hover:text-white transition-colors">
+                            {status}
+                          </span>
+                          <span className="text-[#FAFAFA] font-bold">
+                            {count} ({pct}%)
+                          </span>
+                        </div>
+                        <div className="w-full bg-[#202020] h-2 rounded-[2px] overflow-hidden">
+                          <div
+                            className="bg-[#FAFAFA] group-hover:bg-emerald-400 h-full transition-all duration-300"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="w-full bg-[#202020] h-2 rounded-[2px] overflow-hidden">
-                        <div
-                          className="bg-[#FAFAFA] h-full transition-all duration-300"
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </div>
+                    </Link>
                   );
                 })}
             </div>
@@ -235,6 +413,7 @@ export default function AnalyticsPage() {
                 <Activity className="h-4 w-4 text-[#FAFAFA]" />
                 <span className="font-semibold uppercase tracking-wider">PRIORITY CLASSIFICATION</span>
               </div>
+              <span className="text-[10px] text-[#737373] font-mono">CLICK TO FILTER</span>
             </div>
 
             <div className="space-y-3 font-mono">
@@ -243,29 +422,114 @@ export default function AnalyticsPage() {
                   const total = summary?.totalTasks || 1;
                   const pct = Math.round((count / total) * 100);
                   return (
-                    <div key={priority} className="space-y-1">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-[#A3A3A3]">{priority}</span>
-                        <span className="text-[#FAFAFA] font-bold">{count} ({pct}%)</span>
+                    <Link
+                      key={priority}
+                      href={`/tasks?priority=${priority}`}
+                      className="block group"
+                      title={`Filter tasks by priority ${priority}`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-[#A3A3A3] group-hover:text-white transition-colors">
+                            {priority}
+                          </span>
+                          <span className="text-[#FAFAFA] font-bold">
+                            {count} ({pct}%)
+                          </span>
+                        </div>
+                        <div className="w-full bg-[#202020] h-2 rounded-[2px] overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-300 ${
+                              priority === 'URGENT'
+                                ? 'bg-red-500'
+                                : priority === 'HIGH'
+                                ? 'bg-amber-400'
+                                : 'bg-[#FAFAFA]'
+                            }`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="w-full bg-[#202020] h-2 rounded-[2px] overflow-hidden">
-                        <div
-                          className={`h-full transition-all duration-300 ${
-                            priority === 'URGENT'
-                              ? 'bg-red-500'
-                              : priority === 'HIGH'
-                              ? 'bg-amber-400'
-                              : 'bg-[#FAFAFA]'
-                          }`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </div>
+                    </Link>
                   );
                 })}
             </div>
           </Card>
         </div>
+
+        {/* ─── Project Execution Analytics ─── */}
+        {analytics?.projectsExecution && analytics.projectsExecution.length > 0 && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between border-b border-[#222222] pb-3">
+              <div>
+                <h3 className="text-base font-semibold text-[#FAFAFA] tracking-tight">
+                  Project Execution Analytics
+                </h3>
+                <p className="text-xs text-[#737373]">
+                  Deliverable velocity and task completion across active workspace initiatives.
+                </p>
+              </div>
+              <Link
+                href="/projects"
+                className="text-xs text-[#A3A3A3] hover:text-white flex items-center gap-1 font-mono"
+              >
+                <span>All Projects</span>
+                <ExternalLink className="w-3 h-3" />
+              </Link>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 font-mono">
+              {analytics.projectsExecution.map((proj) => (
+                <Link
+                  key={proj.id}
+                  href={`/tasks?projectId=${proj.id}`}
+                  className="block group"
+                >
+                  <Card className="p-4 space-y-3 bg-[#111111] border-[#262626] group-hover:border-[#444444] transition-all">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold text-white group-hover:text-neutral-200 truncate max-w-[200px]">
+                        {proj.name}
+                      </h4>
+                      <Badge
+                        variant={
+                          proj.health === 'ON_TRACK'
+                            ? 'success'
+                            : proj.health === 'AT_RISK'
+                            ? 'warning'
+                            : 'destructive'
+                        }
+                      >
+                        {proj.health.replace('_', ' ')}
+                      </Badge>
+                    </div>
+
+                    <div className="space-y-1.5 pt-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-[#737373]">PROGRESS</span>
+                        <span className="text-white font-bold">{proj.progress}%</span>
+                      </div>
+                      <div className="w-full bg-[#202020] h-1.5 rounded-full overflow-hidden">
+                        <div
+                          className="bg-neutral-200 h-full rounded-full transition-all duration-300"
+                          style={{ width: `${proj.progress}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-[#737373] pt-1 border-t border-[#1F1F1F]">
+                      <span>{proj.doneTasks}/{proj.totalTasks} tasks done</span>
+                      {proj.overdueTasks > 0 ? (
+                        <span className="text-red-400 font-bold">{proj.overdueTasks} overdue</span>
+                      ) : (
+                        <span className="text-emerald-400">0 overdue</span>
+                      )}
+                    </div>
+                  </Card>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ─── Strategic Goals & OKRs Hub ─── */}
         <div className="space-y-4">

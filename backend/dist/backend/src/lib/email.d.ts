@@ -22,5 +22,6 @@ export declare function resetEmailProvider(): void;
 export declare function getEmailProvider(): EmailProvider;
 export declare function buildVerificationEmail(verifyUrl: string): Omit<EmailMessage, 'to'>;
 export declare function buildPasswordResetEmail(resetUrl: string, otp?: string): Omit<EmailMessage, 'to'>;
-export declare function buildDocumentInvitationEmail(inviteUrl: string, inviterName: string, documentTitle: string, role: string, message?: string): Omit<EmailMessage, 'to'>;
+export declare function buildDocumentInvitationEmail(inviteUrl: string, inviterName: string, documentTitle: string, role: string, recipientEmail?: string, message?: string): Omit<EmailMessage, 'to'>;
+export declare function buildWorkspaceInvitationEmail(inviteUrl: string, inviterName: string, workspaceName: string, role: string, message?: string): Omit<EmailMessage, 'to'>;
 //# sourceMappingURL=email.d.ts.map

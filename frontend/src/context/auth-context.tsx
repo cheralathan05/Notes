@@ -9,15 +9,16 @@ interface AuthContextType {
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  demoLogin: (role?: 'owner' | 'collaborator') => Promise<{ success: boolean; error?: string }>;
   register: (data: { email: string; password: string; confirmPassword: string; displayName: string }) => Promise<{ success: boolean; error?: string }>;
-  logout: () => Promise<void>;
+  logout: (customRedirect?: string | unknown) => Promise<void>;
   refreshUser: () => Promise<void>;
   updateUser: (user: UserPublic) => void;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-const PUBLIC_PATHS = ['/login', '/register', '/forgot-password', '/reset-password', '/verify-email'];
+const PUBLIC_PATHS = ['/login', '/register', '/forgot-password', '/reset-password', '/verify-email', '/invite', '/share', '/checklist'];
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserPublic | null>(null);
@@ -56,9 +57,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!user && !isPublicPath) {
       const redirectTo = pathname !== '/' ? `?redirect=${encodeURIComponent(pathname)}` : '';
       router.replace(`/login${redirectTo}`);
+      return;
     }
 
     if (user && isPublicPath) {
+      // Do not redirect away from active invitation or share links
+      if (pathname.startsWith('/invite') || pathname.startsWith('/share')) {
+        return;
+      }
+
+      // Check if an explicit redirect query parameter exists (e.g. ?redirect=/invite/...)
+      let redirectTarget: string | null = null;
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        const red = params.get('redirect');
+        if (red && red.startsWith('/') && !red.startsWith('//')) {
+          redirectTarget = red;
+        }
+      }
+
+      if (redirectTarget) {
+        router.replace(redirectTarget);
+        return;
+      }
+
       if (!user.onboardingComplete) {
         router.replace('/onboarding');
       } else {
@@ -80,6 +102,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { success: false, error: result.error?.message || 'Login failed' };
   }, []);
 
+  const demoLogin = useCallback(async (role: 'owner' | 'collaborator' = 'owner') => {
+    const result = await api.demoLogin(role);
+    if (result.success && result.data?.user) {
+      setUser(result.data.user);
+      return { success: true };
+    }
+    return { success: false, error: result.error?.message || 'Demo authentication failed' };
+  }, []);
+
   const register = useCallback(async (data: { email: string; password: string; confirmPassword: string; displayName: string }) => {
     const result = await api.register(data);
     if (result.success && result.data?.user) {
@@ -89,10 +120,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { success: false, error: result.error?.message || 'Registration failed' };
   }, []);
 
-  const logout = useCallback(async () => {
+  const logout = useCallback(async (customRedirect?: string | unknown) => {
     await api.logout();
     setUser(null);
-    router.replace('/login');
+    const target = typeof customRedirect === 'string' ? customRedirect : '/login';
+    router.replace(target);
   }, [router]);
 
   const refreshUser = useCallback(async () => {
@@ -113,6 +145,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         isAuthenticated: !!user,
         login,
+        demoLogin,
         register,
         logout,
         refreshUser,
