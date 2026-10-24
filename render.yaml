@@ -4,12 +4,14 @@ services:
     name: kronos-backend
     runtime: node
     plan: free
-    region: oregon
+    region: virginia
     rootDir: .
-    buildCommand: cd backend && npm install --include=dev && npm run render:build
+    buildCommand: npm install --include=dev && cd backend && npm install --include=dev && npm run render:build
     startCommand: cd backend && npm run render:start
     healthCheckPath: /api/health
     envVars:
+      - key: NODE_VERSION
+        value: "20.18.1"
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
@@ -19,7 +21,10 @@ services:
       - key: SESSION_SECRET
         generateValue: true
       - key: FRONTEND_URL
-        value: https://kronos-frontend.onrender.com
+        fromService:
+          type: web
+          name: kronos-frontend
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
       - key: COOKIE_SAME_SITE
         value: none
       - key: EMAIL_PROVIDER
@@ -30,18 +35,20 @@ services:
     name: kronos-frontend
     runtime: node
     plan: free
-    region: oregon
+    region: virginia
     rootDir: frontend
-    buildCommand: npm install --include=dev && (npm run build || npm run build)
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     envVars:
+      - key: NODE_VERSION
+        value: "20.18.1"
       - key: NODE_ENV
         value: production
       - key: BACKEND_INTERNAL_URL
         fromService:
           type: web
           name: kronos-backend
-          property: hostport
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
       - key: NEXT_PUBLIC_API_URL
         value: ""
 
@@ -49,6 +56,6 @@ databases:
   # ─── 3. PostgreSQL Database ─────────────────────────────────────────────────
   - name: kronos-db
     plan: free
-    region: oregon
+    region: virginia
     databaseName: workspace_saas
     user: postgres
