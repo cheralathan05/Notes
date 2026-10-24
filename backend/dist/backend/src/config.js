@@ -30,7 +30,12 @@ exports.config = {
     sessionSecret: process.env.SESSION_SECRET || 'dev-secret-change-me',
     sessionMaxAge: parseInt(process.env.SESSION_MAX_AGE || String(7 * 24 * 60 * 60 * 1000), 10), // 7 days
     // URLs
-    appBaseUrl: (process.env.APP_BASE_URL || process.env.APP_URL || process.env.FRONTEND_URL || 'http://localhost:3001').trim().replace(/\/+$/, ''),
+    appBaseUrl: (() => {
+        const raw = (process.env.APP_BASE_URL || process.env.APP_URL || process.env.FRONTEND_URL || 'http://localhost:3001').trim().replace(/\/+$/, '');
+        if (raw.startsWith('http://') || raw.startsWith('https://'))
+            return raw;
+        return `https://${raw}`;
+    })(),
     apiBaseUrl: (process.env.API_BASE_URL || 'http://localhost:4000').trim().replace(/\/+$/, ''),
     frontendUrl: (() => {
         const raw = (process.env.FRONTEND_URL || process.env.APP_BASE_URL || process.env.APP_URL || 'http://localhost:3001').trim().replace(/\/+$/, '');
