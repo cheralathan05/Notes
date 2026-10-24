@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "node start-dev.js",
+    "postinstall": "cd backend && npm install --include=dev && npm run render:build",
     "build": "cd backend && npm install --include=dev && npm run render:build",
     "start": "cd backend && npm run render:start",
     "start:dev": "node start-dev.js",
