@@ -31,6 +31,50 @@ function findSchema() {
   return path.resolve(__dirname, '../../prisma/schema.prisma');
 }
 
+function copyDirSafely(src, dest) {
+  if (!fs.existsSync(src)) return;
+  try {
+    fs.mkdirSync(dest, { recursive: true });
+    const entries = fs.readdirSync(src, { withFileTypes: true });
+    for (const entry of entries) {
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+      if (entry.isDirectory()) {
+        copyDirSafely(srcPath, destPath);
+      } else {
+        try {
+          fs.copyFileSync(srcPath, destPath);
+        } catch (err) {
+          if (err.code !== 'EPERM' && err.code !== 'EBUSY') {
+            console.warn(`[prisma-generate] Notice on ${entry.name}:`, err.message);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`[prisma-generate] Notice syncing ${src} -> ${dest}:`, err.message);
+  }
+}
+
+function syncClientArtifacts() {
+  const rootNodeModules = path.resolve(__dirname, '../../node_modules');
+  const backendNodeModules = path.resolve(__dirname, '../node_modules');
+
+  const rootPrisma = path.join(rootNodeModules, '.prisma');
+  const rootClient = path.join(rootNodeModules, '@prisma', 'client');
+  const backendPrisma = path.join(backendNodeModules, '.prisma');
+  const backendClient = path.join(backendNodeModules, '@prisma', 'client');
+
+  if (fs.existsSync(rootPrisma)) {
+    console.log('[prisma-generate] Syncing generated .prisma to backend/node_modules/.prisma...');
+    copyDirSafely(rootPrisma, backendPrisma);
+  }
+  if (fs.existsSync(rootClient)) {
+    console.log('[prisma-generate] Syncing generated @prisma/client to backend/node_modules/@prisma/client...');
+    copyDirSafely(rootClient, backendClient);
+  }
+}
+
 function main() {
   const prismaCli = findPrismaCli();
   const schemaPath = findSchema();
@@ -57,7 +101,8 @@ function main() {
 
   child.on('close', (code) => {
     if (code === 0) {
-      console.log('[prisma-generate] ✅ Prisma client generated successfully.');
+      syncClientArtifacts();
+      console.log('[prisma-generate] ✅ Prisma client generated & synchronized successfully.');
       process.exit(0);
     } else {
       console.error(`[prisma-generate] ❌ Prisma generate exited with code ${code}`);
