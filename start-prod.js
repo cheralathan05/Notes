@@ -7,7 +7,7 @@ const npmCmd = isWin ? 'npm.cmd' : 'npm';
 
 // The port exposed to the outside world (Render assigns PORT, default 3000)
 const PUBLIC_PORT = process.env.PORT || '3000';
-const BACKEND_INTERNAL_PORT = '4000';
+const BACKEND_INTERNAL_PORT = String(PUBLIC_PORT) === '4000' ? '4001' : '4000';
 
 console.log('============================================================');
 console.log('       KRONOS SAAS - PRODUCTION FULL-STACK RUNNER           ');

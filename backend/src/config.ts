@@ -1,10 +1,10 @@
 import dotenv from 'dotenv';
 import path from 'path';
 
-// Load .env files from both project root and backend directory reliably regardless of cwd
-dotenv.config({ path: path.resolve(__dirname, '../../.env'), override: true });
-dotenv.config({ path: path.resolve(__dirname, '../.env'), override: true });
-dotenv.config({ override: true });
+// Load .env files for local development, but preserve platform environment variables (Render DATABASE_URL, PORT, etc.)
+dotenv.config({ path: path.resolve(__dirname, '../../.env'), override: false });
+dotenv.config({ path: path.resolve(__dirname, '../.env'), override: false });
+dotenv.config({ override: false });
 
 const requiredVars = ['DATABASE_URL'];
 

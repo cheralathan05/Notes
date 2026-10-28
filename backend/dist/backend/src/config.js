@@ -7,10 +7,10 @@ exports.config = void 0;
 exports.validateEnv = validateEnv;
 const dotenv_1 = __importDefault(require("dotenv"));
 const path_1 = __importDefault(require("path"));
-// Load .env files from both project root and backend directory reliably regardless of cwd
-dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '../../.env'), override: true });
-dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '../.env'), override: true });
-dotenv_1.default.config({ override: true });
+// Load .env files for local development, but preserve platform environment variables (Render DATABASE_URL, PORT, etc.)
+dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '../../.env'), override: false });
+dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '../.env'), override: false });
+dotenv_1.default.config({ override: false });
 const requiredVars = ['DATABASE_URL'];
 function validateEnv() {
     const missing = requiredVars.filter((key) => !process.env[key]);

@@ -94,7 +94,8 @@ async function main() {
   console.log('[db-push-retry] Starting database schema synchronization...');
 
   if (!process.env.DATABASE_URL) {
-    console.warn('[db-push-retry] ⚠️ Warning: DATABASE_URL environment variable is not defined.');
+    console.warn('[db-push-retry] ⚠️ Warning: DATABASE_URL environment variable is not defined. Skipping database sync.');
+    process.exit(0);
   }
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {

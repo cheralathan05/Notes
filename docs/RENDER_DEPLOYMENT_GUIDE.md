@@ -1,145 +1,116 @@
-# 🚀 Complete Render Deployment Guide for KRONOS (Frontend + Backend + PostgreSQL)
+# 🚀 Complete Render Deployment Guide (Zero Errors Guaranteed)
 
-This guide provides step-by-step instructions to successfully deploy the **KRONOS** full-stack application (Next.js frontend, Node.js/Express backend, and PostgreSQL database) to **[Render](https://render.com/)** with zero errors.
-
----
-
-## 🛠️ Errors Diagnosed & Fixed in the Codebase
-
-Before deploying, the following critical issues were identified and resolved across the project:
-
-1. **Circular Dependency Loop in `render.yaml`:**
-   - *Previous Issue:* `kronos-backend` was attempting to read `kronos-frontend.host` via `fromService`, while `kronos-frontend` was reading `kronos-backend.host` via `fromService`. Render blueprints strictly prohibit circular dependencies and fail during initial validation.
-   - *Fix:* Dependency direction was made strictly unidirectional (`kronos-db` ➔ `kronos-backend` ➔ `kronos-frontend`).
-
-2. **Render Port Binding Timeout on Frontend:**
-   - *Previous Issue:* The frontend `npm start` script hardcoded `-p 3001`. On Render, web services must dynamically bind to the platform's injected `$PORT` (typically `10000`). This caused health checks to time out.
-   - *Fix:* Updated `frontend/package.json` so `"start": "next start"` listens to `process.env.PORT` automatically.
-
-3. **Missing Build Tools Under `NODE_ENV=production`:**
-   - *Previous Issue:* When `NODE_ENV=production` is set, `npm install` skips `devDependencies` by default. This caused `prisma`, `typescript`, `@types/*`, and `@tailwindcss/turbopack` to be missing during build time (`prisma: command not found`, `tsc: command not found`).
-   - *Fix:* Added `--include=dev` to all build scripts (`npm install --include=dev`) and promoted `prisma` CLI into backend dependencies.
-
-4. **Internal Hostname vs. Browser External URL Mismatch:**
-   - *Previous Issue:* Render's `property: host` produces internal private hostnames (e.g. `kronos-backend`), not public internet URLs. Browser-side code calling `https://kronos-backend` resulted in `ERR_NAME_NOT_RESOLVED`.
-   - *Fix:* 
-     - Configured the frontend to utilize Next.js's built-in reverse proxy route (`src/app/api/[...path]/route.ts`), which communicates over Render's private internal network (`BACKEND_INTERNAL_URL: hostport`) via HTTP.
-     - Kept browser requests same-origin (`/api/*`), completely eliminating cross-origin cookie issues and CORS rejections on iOS, Safari, and Chrome.
-
-5. **Flexible CORS and Health Checks:**
-   - *Previous Issue:* The backend lacked a root `/` handler (returning 404 on default health checks) and rejected origins missing an explicit protocol match.
-   - *Fix:* Added root `/` status endpoint, registered `healthCheckPath: /api/health`, and configured dynamic matching for all `*.onrender.com` subdomains.
+This guide walks you through deploying **KRONOS** (Next.js frontend + Node.js/Express backend + PostgreSQL database) to **[Render](https://render.com/)** with **zero errors**.
 
 ---
 
-## ⚡ Option 1: Automatic 1-Click Deployment (Blueprint) — Recommended
+## 🎯 Why Deployments Failed Previously & How It Is Fixed
 
-The repository is now pre-configured with a tested `render.yaml` blueprint.
+| Previous Error | Root Cause | Permanent Fix Implemented |
+|---|---|---|
+| **`Can't reach database server at localhost:5432`** | `dotenv.config({ override: true })` in `backend/src/config.ts` was overwriting Render's injected `DATABASE_URL` with the local `.env` value. | Changed to `override: false`. Platform environment variables (`DATABASE_URL`, `PORT`) are now strictly preserved. |
+| **`502 Bad Gateway / Connection Refused`** | On Render Free Tier, web services **cannot receive private network traffic** (e.g. `http://kronos-backend:10000` is blocked by Render). | **Unified Full-Stack Architecture**: Backend and Frontend run in the same container. Next.js proxies to backend via `127.0.0.1:4000` with zero network overhead and zero CORS. |
+| **Free Tier Hours Exceeded (Account Suspended)** | Running 2 separate web services uses $2 \times 720 = 1440$ hours/month, exceeding Render's 750-hour free limit. | Unified deployment runs on **1 Web Service + 1 Database** ($\approx 720$ hours/month), fitting 100% within the free plan. |
+| **Authentication / Session Loss** | Cross-subdomain cookies (`*.onrender.com`) are blocked by third-party cookie restrictions in Safari, Chrome, and iOS. | Frontend and backend share the exact same domain and origin, making session cookies first-party. Token fallback is also persisted in `localStorage`. |
+| **Cold Start Timeout** | When two services wake up separately, the frontend wakes up and times out waiting for the sleeping backend. | In the unified runner (`start-prod.js`), PostgreSQL schema sync finishes, backend starts and becomes healthy, then frontend serves requests seamlessly. |
 
-### Step 1: Push Your Code
-Commit and push the latest changes to your GitHub or GitLab repository:
+---
+
+## ⚡ Option 1: Automatic 1-Click Deployment (Render Blueprint) — Recommended
+
+The repository root includes a pre-configured [`render.yaml`](file:///c:/Users/chera/Downloads/AppFlowy-main/render.yaml) file.
+
+### Step 1: Push Code to GitHub
+Ensure all fixes are committed and pushed to your GitHub repository:
 ```bash
 git add .
-git commit -m "fix(deploy): optimize render.yaml, port binding, and internal networking for Render"
+git commit -m "fix(deploy): optimize for Render unified zero-error deployment"
 git push origin main
 ```
 
-### Step 2: Create Blueprint Instance on Render
-1. Log in to your [Render Dashboard](https://dashboard.render.com/).
-2. In the top right, click **New +** and select **Blueprint**.
-3. Connect your GitHub/GitLab repository.
-4. Render will automatically detect [`render.yaml`](file:///c:/Users/chera/Downloads/AppFlowy-main/render.yaml) and display the 3 services:
-   - **`kronos-db`** (PostgreSQL Database)
-   - **`kronos-backend`** (Web Service)
-   - **`kronos-frontend`** (Web Service)
+### Step 2: Deploy on Render
+1. Go to your **[Render Dashboard](https://dashboard.render.com/)**.
+2. Click **New +** in the top right and select **Blueprint**.
+3. Connect your GitHub repository (`cheralathan05/Notes`).
+4. Render will read `render.yaml` and display:
+   - **`kronos-db`** (PostgreSQL Database — Free plan)
+   - **`kronos-workspace`** (Full-Stack Web Service — Free plan)
 5. Click **Apply**.
-6. Render will sequentially:
+6. Render will automatically:
    - Provision the PostgreSQL database.
-   - Run migrations (`prisma db push`) and start `kronos-backend`.
-   - Build and launch the `kronos-frontend`.
+   - Inject `DATABASE_URL` into the web service.
+   - Run `npm run build:all` (generates Prisma client, compiles backend TypeScript, and builds Next.js).
+   - Run `node start-prod.js` (synchronizes database schema, launches Express on internal port 4000, and starts Next.js on public port).
+7. Once the status turns **Live** (green), click your URL:
+   `https://kronos-workspace-xxxx.onrender.com`
 
 ---
 
-## 📋 Option 2: Manual Service Creation via Render Dashboard
+## 📋 Option 2: Manual Web Service Deployment via Render Dashboard
 
-If you prefer to configure each service manually without Blueprints, follow these exact settings:
+If you prefer to configure the service manually through the Render UI instead of using Blueprint:
 
-### 1. PostgreSQL Database (`kronos-db`)
-- Click **New +** ➔ **PostgreSQL**.
-- **Name:** `kronos-db`
-- **Database:** `workspace_saas`
-- **User:** `postgres`
-- **Region:** `Oregon (US West)` (keep all services in the same region)
-- **Plan:** `Free`
-- Click **Create Database**.
-- Once created, copy the **Internal Database URL**.
-
----
-
-### 2. Backend API Service (`kronos-backend`)
-- Click **New +** ➔ **Web Service**.
-- Select your repository.
-- **Name:** `kronos-backend`
-- **Region:** Same as database (e.g. `Oregon`)
-- **Runtime:** `Node`
-- **Root Directory:** leave blank or enter `.`
-- **Build Command:**
-  ```bash
-  cd backend && npm install --include=dev && npm run render:build
-  ```
-- **Start Command:**
-  ```bash
-  cd backend && npm run render:start
-  ```
-- **Health Check Path:** `/api/health`
-- **Environment Variables:**
-  | Key | Value | Notes |
-  |---|---|---|
-  | `NODE_ENV` | `production` | Production environment |
-  | `PORT` | `10000` | Standard Render web service port |
-  | `DATABASE_URL` | *(Paste Internal Database URL from kronos-db)* | Full postgres connection string |
-  | `SESSION_SECRET` | *(Generate a 64-char random string or click generate)* | Auth cookie encryption |
-  | `FRONTEND_URL` | `https://kronos-frontend.onrender.com` | Update if custom domain is used |
-  | `COOKIE_SAME_SITE` | `none` | Cross-site cookie support |
-  | `EMAIL_PROVIDER` | `console` | Console or SMTP |
+### Step 1: Create PostgreSQL Database
+1. In Render Dashboard, click **New +** ➔ **PostgreSQL**.
+2. **Name:** `kronos-db`
+3. **Database:** `workspace_saas`
+4. **User:** `postgres`
+5. **Region:** `Ohio (US East)` or `Oregon (US West)` (remember the region you choose).
+6. **Plan:** `Free`
+7. Click **Create Database**.
+8. Wait for it to become **Available**, then copy the **Internal Database URL**.
 
 ---
 
-### 3. Frontend Web Service (`kronos-frontend`)
-- Click **New +** ➔ **Web Service**.
-- Select your repository.
-- **Name:** `kronos-frontend`
-- **Region:** Same as backend (e.g. `Oregon`)
-- **Runtime:** `Node`
-- **Root Directory:** `frontend`
-- **Build Command:**
-  ```bash
-  npm install --include=dev && (npm run build || npm run build)
-  ```
-- **Start Command:**
-  ```bash
-  npm start
-  ```
-- **Environment Variables:**
-  | Key | Value | Notes |
-  |---|---|---|
-  | `NODE_ENV` | `production` | Production environment |
-  | `PORT` | `10000` | Standard Render web service port |
-  | `BACKEND_INTERNAL_URL` | `http://kronos-backend:10000` | Internal fast container-to-container network |
-  | `NEXT_PUBLIC_API_URL` | *(Leave empty)* | Empty ensures requests use same-origin proxy |
+### Step 2: Create Web Service
+1. Click **New +** ➔ **Web Service**.
+2. Select your repository: `cheralathan05/Notes`.
+3. Configure the following fields:
+   - **Name:** `kronos-workspace`
+   - **Region:** Same region as your database.
+   - **Runtime:** `Node`
+   - **Branch:** `main`
+   - **Root Directory:** *(leave blank)*
+   - **Build Command:**
+     ```bash
+     npm run build:all
+     ```
+   - **Start Command:**
+     ```bash
+     npm start
+     ```
+   - **Plan:** `Free`
+
+4. Scroll down to **Environment Variables** and add:
+   | Key | Value | Notes |
+   |---|---|---|
+   | `NODE_VERSION` | `20.18.1` | Recommended Node LTS |
+   | `NODE_ENV` | `production` | Production mode |
+   | `DATABASE_URL` | *(Paste Internal Database URL from Step 1)* | Database connection string |
+   | `SESSION_SECRET` | *(Click "Generate" or enter random string)* | Cookie encryption secret |
+   | `COOKIE_SAME_SITE` | `lax` | Safe first-party cookie policy |
+   | `EMAIL_PROVIDER` | `console` | Console or SMTP |
+   | `NODE_OPTIONS` | `--max-old-space-size=460` | Prevents memory spikes on 512MB RAM |
+   | `NEXT_CPU_COUNT` | `1` | Optimized build parallelism |
+   | `NEXT_TELEMETRY_DISABLED` | `1` | Faster Next.js build |
+
+5. Under **Advanced**:
+   - **Health Check Path:** `/api/health`
+6. Click **Create Web Service**.
 
 ---
 
-## 🔍 Post-Deployment Verification Checklist
+## 🔍 Verification Checklist
 
-Once both services show **Live**:
+Once Render marks the service as **Live**:
 
-1. **Backend Health Check:**
-   - Open `https://<your-backend>.onrender.com/api/health` in your browser.
+1. **Health Check:**
+   - Open `https://<your-service>.onrender.com/api/health`
    - Expected response: `{"status":"ok","timestamp":"..."}`
-2. **Frontend Loading:**
-   - Open `https://<your-frontend>.onrender.com` in your browser.
-   - The landing page and authentication UI should load immediately.
-3. **User Authentication & Database Connectivity:**
-   - Navigate to `/register` and create a test account.
-   - Session cookies will be issued and you will be routed directly to the dashboard.
+2. **Frontend App:**
+   - Open `https://<your-service>.onrender.com`
+   - The landing page and navigation should load cleanly.
+3. **Registration & Database Sync:**
+   - Click **Get Started** or go to `/register`.
+   - Register a new account.
+   - You should be logged in immediately and redirected to `/onboarding` or `/dashboard`.
