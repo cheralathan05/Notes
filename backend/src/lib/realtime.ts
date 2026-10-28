@@ -91,7 +91,7 @@ class RealtimeHub {
     const currentActive = this.getActiveCollaborators(workspaceId, documentId || undefined);
     try {
       res.write(
-        `data: ${JSON.stringify({
+        `event: CONNECTED\ndata: ${JSON.stringify({
           type: 'CONNECTED',
           clientId,
           activeCollaborators: currentActive,
@@ -198,7 +198,8 @@ class RealtimeHub {
       activeCollaborators: activeList,
     };
 
-    const message = `data: ${JSON.stringify({
+    // Named SSE event so frontend addEventListener('PRESENCE_UPDATED') works
+    const message = `event: PRESENCE_UPDATED\ndata: ${JSON.stringify({
       type: 'PRESENCE_UPDATED',
       data: payload,
       timestamp: new Date().toISOString(),
@@ -223,7 +224,9 @@ class RealtimeHub {
     payload: any,
     options?: { documentId?: string; excludeClientId?: string }
   ) {
-    const message = `data: ${JSON.stringify({
+    // Named SSE event: "event: <eventType>\ndata: <json>\n\n"
+    // This allows the frontend to use addEventListener(eventType, handler)
+    const message = `event: ${eventType}\ndata: ${JSON.stringify({
       type: eventType,
       data: payload,
       timestamp: new Date().toISOString(),

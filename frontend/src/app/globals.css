@@ -230,7 +230,7 @@ body {
   animation: spin 0.8s linear infinite;
 }
 
-/* ─── TipTap & ProseMirror Monochrome Styles ───────────────────────────────── */
+/* ─── TipTap / ProseMirror (Dark App Mode) ─────────────────────────────────── */
 
 .ProseMirror {
   outline: none;
@@ -433,3 +433,214 @@ body {
 .ProseMirror a:hover {
   color: #A3A3A3;
 }
+
+/* ─── Google Docs-Style Document Editor (White canvas mode) ─────────────────── */
+/* Applied to the document canvas only via .prose-gdocs wrapper */
+
+.prose-gdocs .ProseMirror {
+  outline: none;
+  min-height: 500px;
+  color: #202124;
+  font-size: 11pt;
+  line-height: 1.5;
+  font-family: Arial, sans-serif;
+  caret-color: #1a73e8;
+}
+
+.prose-gdocs .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #bdc1c6;
+  pointer-events: none;
+  height: 0;
+  font-style: normal;
+}
+
+.prose-gdocs .ProseMirror h1 {
+  font-size: 20pt;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: #202124;
+  margin-top: 24px;
+  margin-bottom: 6px;
+  line-height: 1.3;
+  font-family: Arial, sans-serif;
+}
+
+.prose-gdocs .ProseMirror h2 {
+  font-size: 16pt;
+  font-weight: 400;
+  color: #202124;
+  margin-top: 18px;
+  margin-bottom: 4px;
+  line-height: 1.3;
+}
+
+.prose-gdocs .ProseMirror h3 {
+  font-size: 14pt;
+  font-weight: 500;
+  color: #202124;
+  margin-top: 16px;
+  margin-bottom: 4px;
+  line-height: 1.3;
+}
+
+.prose-gdocs .ProseMirror p {
+  margin-bottom: 0;
+  min-height: 1.5em;
+}
+
+.prose-gdocs .ProseMirror ul {
+  list-style-type: disc;
+  padding-left: 24px;
+  margin-bottom: 0;
+  color: #202124;
+}
+
+.prose-gdocs .ProseMirror ol {
+  list-style-type: decimal;
+  padding-left: 24px;
+  margin-bottom: 0;
+  color: #202124;
+}
+
+.prose-gdocs .ProseMirror li {
+  margin-bottom: 2px;
+  color: #202124;
+}
+
+.prose-gdocs .ProseMirror ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+}
+
+.prose-gdocs .ProseMirror ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.prose-gdocs .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"] {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid #5f6368;
+  border-radius: 2px;
+  background-color: white;
+  cursor: pointer;
+  display: inline-grid;
+  place-content: center;
+  transition: all 120ms ease;
+  margin-top: 3px;
+}
+
+.prose-gdocs .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"]:checked {
+  background-color: #1a73e8;
+  border-color: #1a73e8;
+}
+
+.prose-gdocs .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"]:checked::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  background-color: white;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+}
+
+.prose-gdocs .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div > p {
+  text-decoration: line-through;
+  color: #9aa0a6;
+}
+
+.prose-gdocs .ProseMirror blockquote {
+  border-left: 3px solid #e8eaed;
+  padding-left: 16px;
+  color: #5f6368;
+  font-style: italic;
+  margin: 8px 0;
+}
+
+.prose-gdocs .ProseMirror code {
+  background-color: #f1f3f4;
+  border: none;
+  padding: 2px 6px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9em;
+  border-radius: 2px;
+  color: #d93025;
+}
+
+.prose-gdocs .ProseMirror pre {
+  background-color: #f8f9fa;
+  border: 1px solid #e8eaed;
+  padding: 12px 16px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 12px 0;
+  font-family: 'Courier New', monospace;
+  font-size: 10pt;
+  color: #202124;
+  line-height: 1.5;
+}
+
+.prose-gdocs .ProseMirror pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+.prose-gdocs .ProseMirror table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  border: 1px solid #e8eaed;
+  font-size: 10pt;
+}
+
+.prose-gdocs .ProseMirror th,
+.prose-gdocs .ProseMirror td {
+  border: 1px solid #e8eaed;
+  padding: 6px 12px;
+  vertical-align: top;
+  color: #202124;
+}
+
+.prose-gdocs .ProseMirror th {
+  background-color: #f8f9fa;
+  font-weight: 500;
+  color: #202124;
+  text-align: left;
+}
+
+.prose-gdocs .ProseMirror hr {
+  border: 0;
+  border-top: 1px solid #e8eaed;
+  margin: 16px 0;
+}
+
+.prose-gdocs .ProseMirror img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 2px;
+  border: 1px solid #e8eaed;
+  margin: 12px 0;
+}
+
+.prose-gdocs .ProseMirror a {
+  color: #1a73e8;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 120ms ease;
+}
+
+.prose-gdocs .ProseMirror a:hover {
+  color: #1558b0;
+}
+
+/* Selection in Google Docs style */
+.prose-gdocs .ProseMirror ::selection {
+  background-color: rgba(26, 115, 232, 0.2);
+}
+

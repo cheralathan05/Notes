@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 function getBackendUrl(): string {
   const raw = (
     process.env.BACKEND_INTERNAL_URL ||
@@ -24,16 +26,15 @@ function getBackendUrl(): string {
   return `http://${raw}`;
 }
 
-const BACKEND_URL = getBackendUrl();
-
 async function proxyRequest(
   req: NextRequest,
   context: { params: Promise<{ path: string[] }> }
 ) {
+  const backendBase = getBackendUrl();
   const { path } = await context.params;
   const pathSegment = Array.isArray(path) ? path.join('/') : (path || '');
   const search = req.nextUrl.search || '';
-  const targetUrl = `${BACKEND_URL}/api/${pathSegment}${search}`;
+  const targetUrl = `${backendBase}/api/${pathSegment}${search}`;
 
   const forwardHeaders = new Headers();
   req.headers.forEach((value, key) => {
@@ -53,6 +54,7 @@ async function proxyRequest(
       headers: forwardHeaders,
       body,
       redirect: 'manual',
+      cache: 'no-store',
     });
 
     const resHeaders = new Headers();
@@ -64,8 +66,24 @@ async function proxyRequest(
       }
     });
 
-    if (typeof backendRes.headers.getSetCookie === 'function') {
-      const cookies = backendRes.headers.getSetCookie();
+    const isSse = backendRes.headers.get('content-type')?.includes('text/event-stream');
+    if (isSse) {
+      resHeaders.set('Cache-Control', 'no-cache, no-transform');
+      resHeaders.set('Connection', 'keep-alive');
+      resHeaders.set('X-Accel-Buffering', 'no');
+    }
+
+    let cookies: string[] = [];
+    if (typeof (backendRes.headers as any).getSetCookie === 'function') {
+      cookies = (backendRes.headers as any).getSetCookie() || [];
+    }
+    if (cookies.length === 0) {
+      const rawCookie = backendRes.headers.get('set-cookie');
+      if (rawCookie) {
+        cookies = [rawCookie];
+      }
+    }
+    if (cookies.length > 0) {
       resHeaders.delete('set-cookie');
       cookies.forEach((cookie) => {
         resHeaders.append('set-cookie', cookie);

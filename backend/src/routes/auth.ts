@@ -19,6 +19,21 @@ import {
 
 const router = Router();
 
+function getFrontendBaseUrl(req: Request): string {
+  const origin = req.headers.origin;
+  if (origin && typeof origin === 'string') {
+    return origin.replace(/\/+$/, '');
+  }
+  const referer = req.headers.referer;
+  if (referer && typeof referer === 'string') {
+    try {
+      const url = new URL(referer);
+      return url.origin;
+    } catch {}
+  }
+  return config.frontendUrl;
+}
+
 // ─── Helper: safe user serialization ─────────────────────────────────────────
 
 function serializeUser(user: {
@@ -91,7 +106,8 @@ router.post('/register', validate(registerSchema), async (req: Request, res: Res
     });
 
     // Send verification email
-    const verifyUrl = `${config.frontendUrl}/verify-email?token=${verifyToken}`;
+    const frontendBase = getFrontendBaseUrl(req);
+    const verifyUrl = `${frontendBase}/verify-email?token=${verifyToken}`;
     const emailContent = buildVerificationEmail(verifyUrl);
     try {
       await getEmailProvider().send({ ...emailContent, to: user.email });
@@ -479,7 +495,8 @@ router.post('/resend-verification', authMiddleware, async (req: Request, res: Re
       },
     });
 
-    const verifyUrl = `${config.frontendUrl}/verify-email?token=${verifyToken}`;
+    const frontendBase = getFrontendBaseUrl(req);
+    const verifyUrl = `${frontendBase}/verify-email?token=${verifyToken}`;
     const emailContent = buildVerificationEmail(verifyUrl);
     await getEmailProvider().send({ ...emailContent, to: user.email });
 
@@ -546,7 +563,8 @@ router.post('/forgot-password', validate(forgotPasswordSchema), async (req: Requ
       },
     });
 
-    const resetUrl = `${config.frontendUrl}/reset-password?token=${resetToken}`;
+    const frontendBase = getFrontendBaseUrl(req);
+    const resetUrl = `${frontendBase}/reset-password?token=${resetToken}`;
     const emailContent = buildPasswordResetEmail(resetUrl, otp);
     try {
       await getEmailProvider().send({ ...emailContent, to: user.email });

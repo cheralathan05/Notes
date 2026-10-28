@@ -67,7 +67,7 @@ const corsOptions: cors.CorsOptions = {
     if (isAllowed) {
       return callback(null, true);
     }
-    return callback(new Error(`CORS blocked for origin: ${origin}`));
+    return callback(null, false);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
@@ -170,8 +170,8 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 // ─── Start server ────────────────────────────────────────────────────────────
 
-app.listen(config.port, () => {
-  console.log(`\n🚀 Backend server running on http://localhost:${config.port}`);
+app.listen(config.port, '0.0.0.0', () => {
+  console.log(`\n🚀 Backend server running on http://0.0.0.0:${config.port}`);
   console.log(`   Environment: ${config.nodeEnv}`);
   console.log(`   Frontend URL: ${config.frontendUrl}`);
   console.log(`   Email Provider: ${config.emailProvider}\n`);

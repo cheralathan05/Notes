@@ -15,6 +15,21 @@ const config_1 = require("../config");
 const crypto_1 = __importDefault(require("crypto"));
 const shared_import_1 = require("../../shared-import");
 const router = (0, express_1.Router)();
+function getFrontendBaseUrl(req) {
+    const origin = req.headers.origin;
+    if (origin && typeof origin === 'string') {
+        return origin.replace(/\/+$/, '');
+    }
+    const referer = req.headers.referer;
+    if (referer && typeof referer === 'string') {
+        try {
+            const url = new URL(referer);
+            return url.origin;
+        }
+        catch { }
+    }
+    return config_1.config.frontendUrl;
+}
 // ─── Helper: safe user serialization ─────────────────────────────────────────
 function serializeUser(user) {
     return {
@@ -69,7 +84,8 @@ router.post('/register', (0, validate_1.validate)(shared_import_1.registerSchema
             },
         });
         // Send verification email
-        const verifyUrl = `${config_1.config.frontendUrl}/verify-email?token=${verifyToken}`;
+        const frontendBase = getFrontendBaseUrl(req);
+        const verifyUrl = `${frontendBase}/verify-email?token=${verifyToken}`;
         const emailContent = (0, email_1.buildVerificationEmail)(verifyUrl);
         try {
             await (0, email_1.getEmailProvider)().send({ ...emailContent, to: user.email });
@@ -414,7 +430,8 @@ router.post('/resend-verification', auth_1.authMiddleware, async (req, res) => {
                 expiresAt: new Date(Date.now() + config_1.config.emailVerificationExpiry),
             },
         });
-        const verifyUrl = `${config_1.config.frontendUrl}/verify-email?token=${verifyToken}`;
+        const frontendBase = getFrontendBaseUrl(req);
+        const verifyUrl = `${frontendBase}/verify-email?token=${verifyToken}`;
         const emailContent = (0, email_1.buildVerificationEmail)(verifyUrl);
         await (0, email_1.getEmailProvider)().send({ ...emailContent, to: user.email });
         res.json({
@@ -471,7 +488,8 @@ router.post('/forgot-password', (0, validate_1.validate)(shared_import_1.forgotP
                 expiresAt: new Date(Date.now() + 15 * 60 * 1000), // 15-minute OTP lifetime
             },
         });
-        const resetUrl = `${config_1.config.frontendUrl}/reset-password?token=${resetToken}`;
+        const frontendBase = getFrontendBaseUrl(req);
+        const resetUrl = `${frontendBase}/reset-password?token=${resetToken}`;
         const emailContent = (0, email_1.buildPasswordResetEmail)(resetUrl, otp);
         try {
             await (0, email_1.getEmailProvider)().send({ ...emailContent, to: user.email });

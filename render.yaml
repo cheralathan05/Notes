@@ -20,11 +20,6 @@ services:
           property: connectionString
       - key: SESSION_SECRET
         generateValue: true
-      - key: FRONTEND_URL
-        fromService:
-          type: web
-          name: kronos-frontend
-          envVarKey: RENDER_EXTERNAL_HOSTNAME
       - key: COOKIE_SAME_SITE
         value: none
       - key: EMAIL_PROVIDER
@@ -51,6 +46,12 @@ services:
           envVarKey: RENDER_EXTERNAL_HOSTNAME
       - key: NEXT_PUBLIC_API_URL
         value: ""
+      - key: NODE_OPTIONS
+        value: "--max-old-space-size=460"
+      - key: NEXT_CPU_COUNT
+        value: "1"
+      - key: NEXT_TELEMETRY_DISABLED
+        value: "1"
 
 databases:
   # ─── 3. PostgreSQL Database ─────────────────────────────────────────────────

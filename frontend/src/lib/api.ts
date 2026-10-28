@@ -68,6 +68,17 @@ class ApiClient {
       headers['x-workspace-id'] = currentWs;
     }
 
+    if (typeof window !== 'undefined') {
+      try {
+        const storedToken = localStorage.getItem('kronos:auth-token');
+        if (storedToken && !headers['Authorization'] && !headers['authorization']) {
+          headers['Authorization'] = `Bearer ${storedToken}`;
+        }
+      } catch {
+        // Ignored in restricted environments
+      }
+    }
+
     try {
       const response = await fetch(url, {
         ...options,
@@ -79,6 +90,16 @@ class ApiClient {
       });
 
       const data = await response.json() as ApiResponse<T>;
+      
+      // Auto-persist returned token as authorization bearer fallback
+      if (typeof window !== 'undefined' && data && (data as any).data && (data as any).data.token) {
+        try {
+          localStorage.setItem('kronos:auth-token', (data as any).data.token);
+        } catch {
+          // Ignored
+        }
+      }
+
       return data;
     } catch (error) {
       console.error(`API request failed: ${path}`, error);
@@ -100,20 +121,27 @@ class ApiClient {
     confirmPassword: string;
     displayName: string;
   }) {
-    return this.request<{ user: UserPublic }>('/api/auth/register', {
+    return this.request<{ user: UserPublic; token?: string }>('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
   async login(data: { email: string; password: string }) {
-    return this.request<{ user: UserPublic }>('/api/auth/login', {
+    return this.request<{ user: UserPublic; token?: string }>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
   async logout() {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('kronos:auth-token');
+      } catch {
+        // Ignored
+      }
+    }
     return this.request('/api/auth/logout', { method: 'POST' });
   }
 

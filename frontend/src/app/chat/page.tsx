@@ -118,6 +118,53 @@ export default function ChatPage() {
     let isMounted = true;
     let sse: EventSource | null = null;
     let retryTimeout: NodeJS.Timeout | null = null;
+    let pollInterval: NodeJS.Timeout | null = null;
+
+    // Centralized dispatch by event type
+    const dispatchChatEvent = (type: string, payload: any) => {
+      if (!isMounted) return;
+      switch (type) {
+        case 'chat:message': {
+          const newMsg = payload.message;
+          const channel = payload.channel || payload.channelId;
+          if (newMsg) {
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === newMsg.id)) return prev;
+              if (channel === activeChannel || newMsg.channel === activeChannel) return [...prev, newMsg];
+              return prev;
+            });
+            setChannels((prev) => prev.map((c) =>
+              c.name === channel || c.id === channel
+                ? { ...c, messageCount: c.messageCount + 1, lastMessage: { id: newMsg.id, content: newMsg.content, createdAt: newMsg.createdAt, author: newMsg.user?.displayName || 'User' } }
+                : c
+            ));
+          }
+          break;
+        }
+        case 'chat:edited': {
+          const updatedMsg = payload.message;
+          if (updatedMsg) setMessages((prev) => prev.map((m) => (m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m)));
+          break;
+        }
+        case 'chat:deleted':
+          if (payload.messageId) setMessages((prev) => prev.filter((m) => m.id !== payload.messageId));
+          break;
+        case 'chat:reaction': {
+          const { messageId, reactions } = payload;
+          if (messageId && reactions) setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, reactions } : m)));
+          break;
+        }
+        case 'chat:pin': {
+          const { messageId, pinned } = payload;
+          if (messageId !== undefined) setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, pinned } : m)));
+          break;
+        }
+        case 'chat:channel_created':
+        case 'chat:channel_updated':
+          loadChannels();
+          break;
+      }
+    };
 
     const connectSSE = () => {
       try {
@@ -127,118 +174,52 @@ export default function ChatPage() {
         eventSourceRef.current = sse;
 
         sse.onopen = () => {
-          if (isMounted) setConnectionState('connected');
+          if (isMounted) {
+            setConnectionState('connected');
+            if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+          }
         };
 
         sse.onerror = () => {
           if (isMounted) {
             setConnectionState('disconnected');
             sse?.close();
+            // Polling fallback when SSE is down
+            if (!pollInterval) {
+              pollInterval = setInterval(() => { if (isMounted) fetchMessages(activeChannel, false); }, 5000);
+            }
             retryTimeout = setTimeout(connectSSE, 5000);
           }
         };
 
-        // Listen for chat events
+        // ── Named SSE event listeners (matching event: <type> from backend) ──
         sse.addEventListener('chat:message', (evt: MessageEvent) => {
-          if (!isMounted) return;
-          try {
-            const parsed = JSON.parse(evt.data);
-            const payload = parsed.data || parsed;
-            const newMsg = payload.message;
-            const channel = payload.channel || payload.channelId;
-
-            if (newMsg) {
-              setMessages((prev) => {
-                if (prev.some((m) => m.id === newMsg.id)) return prev;
-                if (channel === activeChannel || newMsg.channel === activeChannel) {
-                  return [...prev, newMsg];
-                }
-                return prev;
-              });
-
-              // Update channel message count in sidebar
-              setChannels((prev) =>
-                prev.map((c) =>
-                  c.name === channel || c.id === channel
-                    ? {
-                        ...c,
-                        messageCount: c.messageCount + 1,
-                        lastMessage: {
-                          id: newMsg.id,
-                          content: newMsg.content,
-                          createdAt: newMsg.createdAt,
-                          author: newMsg.user?.displayName || 'User',
-                        },
-                      }
-                    : c
-                )
-              );
-            }
-          } catch (e) {
-            console.error('SSE chat:message parse error:', e);
-          }
+          try { dispatchChatEvent('chat:message', JSON.parse(evt.data).data || JSON.parse(evt.data)); } catch (e) { console.error('SSE chat:message parse error:', e); }
         });
-
         sse.addEventListener('chat:edited', (evt: MessageEvent) => {
-          if (!isMounted) return;
-          try {
-            const parsed = JSON.parse(evt.data);
-            const payload = parsed.data || parsed;
-            const updatedMsg = payload.message;
-            if (updatedMsg) {
-              setMessages((prev) =>
-                prev.map((m) => (m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m))
-              );
-            }
-          } catch (e) {}
+          try { dispatchChatEvent('chat:edited', JSON.parse(evt.data).data || JSON.parse(evt.data)); } catch (e) {}
         });
-
         sse.addEventListener('chat:deleted', (evt: MessageEvent) => {
-          if (!isMounted) return;
-          try {
-            const parsed = JSON.parse(evt.data);
-            const payload = parsed.data || parsed;
-            const msgId = payload.messageId;
-            if (msgId) {
-              setMessages((prev) => prev.filter((m) => m.id !== msgId));
-            }
-          } catch (e) {}
+          try { dispatchChatEvent('chat:deleted', JSON.parse(evt.data).data || JSON.parse(evt.data)); } catch (e) {}
         });
-
         sse.addEventListener('chat:reaction', (evt: MessageEvent) => {
-          if (!isMounted) return;
-          try {
-            const parsed = JSON.parse(evt.data);
-            const payload = parsed.data || parsed;
-            const { messageId, reactions } = payload;
-            if (messageId && reactions) {
-              setMessages((prev) =>
-                prev.map((m) => (m.id === messageId ? { ...m, reactions } : m))
-              );
-            }
-          } catch (e) {}
+          try { dispatchChatEvent('chat:reaction', JSON.parse(evt.data).data || JSON.parse(evt.data)); } catch (e) {}
         });
-
         sse.addEventListener('chat:pin', (evt: MessageEvent) => {
+          try { dispatchChatEvent('chat:pin', JSON.parse(evt.data).data || JSON.parse(evt.data)); } catch (e) {}
+        });
+        sse.addEventListener('chat:channel_created', () => loadChannels());
+        sse.addEventListener('chat:channel_updated', () => loadChannels());
+
+        // ── Generic fallback: handle unlabelled data: events ──
+        sse.addEventListener('message', (evt: MessageEvent) => {
           if (!isMounted) return;
           try {
             const parsed = JSON.parse(evt.data);
-            const payload = parsed.data || parsed;
-            const { messageId, pinned } = payload;
-            if (messageId !== undefined) {
-              setMessages((prev) =>
-                prev.map((m) => (m.id === messageId ? { ...m, pinned } : m))
-              );
+            if (parsed.type && typeof parsed.type === 'string') {
+              dispatchChatEvent(parsed.type, parsed.data || parsed);
             }
           } catch (e) {}
-        });
-
-        sse.addEventListener('chat:channel_created', () => {
-          loadChannels();
-        });
-
-        sse.addEventListener('chat:channel_updated', () => {
-          loadChannels();
         });
       } catch (err) {
         if (isMounted) setConnectionState('disconnected');
@@ -247,17 +228,10 @@ export default function ChatPage() {
 
     connectSSE();
 
-    // Fallback polling every 8s if disconnected
-    const fallbackPoll = setInterval(() => {
-      if (connectionState === 'disconnected') {
-        fetchMessages(activeChannel, false);
-      }
-    }, 8000);
-
     return () => {
       isMounted = false;
       if (retryTimeout) clearTimeout(retryTimeout);
-      clearInterval(fallbackPoll);
+      if (pollInterval) clearInterval(pollInterval);
       if (sse) sse.close();
     };
   }, [currentWorkspace?.id, activeChannel]);

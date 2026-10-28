@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useState } from 'react';
 import { type Editor } from '@tiptap/react';
@@ -61,17 +61,17 @@ export function EditorToolbar({
   };
 
   const statusIndicators = {
-    saved: { label: 'PERSISTED // SAVED', color: 'text-[#A3A3A3]', dot: 'bg-[#FAFAFA]' },
-    saving: { label: 'TRANSMITTING...', color: 'text-[#FAFAFA]', dot: 'bg-[#A3A3A3] animate-pulse' },
-    unsaved: { label: 'UNSAVED CHANGES', color: 'text-[#737373]', dot: 'bg-[#505050]' },
-    conflict: { label: '409 CONFLICT // SYNC REQUIRED', color: 'text-[#FAFAFA]', dot: 'bg-[#FAFAFA]' },
-    error: { label: 'TRANSMISSION ERROR', color: 'text-[#A3A3A3]', dot: 'bg-[#737373]' },
+    saved: { label: 'All changes saved', color: 'text-[#5f6368]', dot: 'bg-[#34a853]' },
+    saving: { label: 'Saving...', color: 'text-[#1a73e8]', dot: 'bg-[#1a73e8] animate-pulse' },
+    unsaved: { label: 'Unsaved changes', color: 'text-[#ea4335]', dot: 'bg-[#ea4335]' },
+    conflict: { label: 'Conflict - refresh needed', color: 'text-[#ea4335]', dot: 'bg-[#ea4335]' },
+    error: { label: 'Error saving', color: 'text-[#ea4335]', dot: 'bg-[#ea4335]' },
   };
 
   const currentStatus = statusIndicators[saveStatus];
 
   return (
-    <div className="sticky top-0 z-30 bg-[#080808]/95 backdrop-blur-md border-b border-[#222222] px-4 py-2 flex flex-wrap items-center justify-between gap-2 select-none">
+    <div className="sticky top-0 z-30 bg-[#f8f9fa] border-b border-[#e0e0e0] px-4 py-1.5 flex flex-wrap items-center justify-between gap-2 select-none">
       {/* ─── Left: Formatting Controls ─── */}
       <div className="flex flex-wrap items-center gap-0.5">
         {/* Headings */}
@@ -80,8 +80,8 @@ export function EditorToolbar({
           onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
           className={`p-1.5 rounded-[2px] transition-colors ${
             editor.isActive('heading', { level: 1 })
-              ? 'bg-[#222222] text-[#FAFAFA]'
-              : 'text-[#737373] hover:text-[#FAFAFA] hover:bg-[#141414]'
+              ? 'bg-[#e8eaed] text-[#202124]'
+              : 'text-[#5f6368] hover:text-[#202124] hover:bg-[#e8eaed]'
           }`}
           title="Heading 1"
         >
@@ -93,8 +93,8 @@ export function EditorToolbar({
           onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
           className={`p-1.5 rounded-[2px] transition-colors ${
             editor.isActive('heading', { level: 2 })
-              ? 'bg-[#222222] text-[#FAFAFA]'
-              : 'text-[#737373] hover:text-[#FAFAFA] hover:bg-[#141414]'
+              ? 'bg-[#e8eaed] text-[#202124]'
+              : 'text-[#5f6368] hover:text-[#202124] hover:bg-[#e8eaed]'
           }`}
           title="Heading 2"
         >
@@ -106,15 +106,15 @@ export function EditorToolbar({
           onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
           className={`p-1.5 rounded-[2px] transition-colors ${
             editor.isActive('heading', { level: 3 })
-              ? 'bg-[#222222] text-[#FAFAFA]'
-              : 'text-[#737373] hover:text-[#FAFAFA] hover:bg-[#141414]'
+              ? 'bg-[#e8eaed] text-[#202124]'
+              : 'text-[#5f6368] hover:text-[#202124] hover:bg-[#e8eaed]'
           }`}
           title="Heading 3"
         >
           <Heading3 className="h-3.5 w-3.5" />
         </button>
 
-        <span className="w-[1px] h-4 bg-[#222222] mx-1" />
+        <span className="w-[1px] h-4 bg-[#e0e0e0] mx-1" />
 
         {/* Text styling */}
         <button
@@ -122,8 +122,8 @@ export function EditorToolbar({
           onClick={() => editor.chain().focus().toggleBold().run()}
           className={`p-1.5 rounded-[2px] transition-colors ${
             editor.isActive('bold')
-              ? 'bg-[#222222] text-[#FAFAFA]'
-              : 'text-[#737373] hover:text-[#FAFAFA] hover:bg-[#141414]'
+              ? 'bg-[#e8eaed] text-[#202124]'
+              : 'text-[#5f6368] hover:text-[#202124] hover:bg-[#e8eaed]'
           }`}
           title="Bold (⌘B)"
         >
@@ -135,8 +135,8 @@ export function EditorToolbar({
           onClick={() => editor.chain().focus().toggleItalic().run()}
           className={`p-1.5 rounded-[2px] transition-colors ${
             editor.isActive('italic')
-              ? 'bg-[#222222] text-[#FAFAFA]'
-              : 'text-[#737373] hover:text-[#FAFAFA] hover:bg-[#141414]'
+              ? 'bg-[#e8eaed] text-[#202124]'
+              : 'text-[#5f6368] hover:text-[#202124] hover:bg-[#e8eaed]'
           }`}
           title="Italic (⌘I)"
         >
@@ -148,8 +148,8 @@ export function EditorToolbar({
           onClick={() => editor.chain().focus().toggleUnderline().run()}
           className={`p-1.5 rounded-[2px] transition-colors ${
             editor.isActive('underline')
-              ? 'bg-[#222222] text-[#FAFAFA]'
-              : 'text-[#737373] hover:text-[#FAFAFA] hover:bg-[#141414]'
+              ? 'bg-[#e8eaed] text-[#202124]'
+              : 'text-[#5f6368] hover:text-[#202124] hover:bg-[#e8eaed]'
           }`}
           title="Underline (⌘U)"
         >
@@ -161,8 +161,8 @@ export function EditorToolbar({
           onClick={() => editor.chain().focus().toggleStrike().run()}
           className={`p-1.5 rounded-[2px] transition-colors ${
             editor.isActive('strike')
-              ? 'bg-[#222222] text-[#FAFAFA]'
-              : 'text-[#737373] hover:text-[#FAFAFA] hover:bg-[#141414]'
+              ? 'bg-[#e8eaed] text-[#202124]'
+              : 'text-[#5f6368] hover:text-[#202124] hover:bg-[#e8eaed]'
           }`}
           title="Strikethrough"
         >
@@ -174,15 +174,15 @@ export function EditorToolbar({
           onClick={() => editor.chain().focus().toggleCode().run()}
           className={`p-1.5 rounded-[2px] transition-colors ${
             editor.isActive('code')
-              ? 'bg-[#222222] text-[#FAFAFA]'
-              : 'text-[#737373] hover:text-[#FAFAFA] hover:bg-[#141414]'
+              ? 'bg-[#e8eaed] text-[#202124]'
+              : 'text-[#5f6368] hover:text-[#202124] hover:bg-[#e8eaed]'
           }`}
           title="Inline Code"
         >
           <Code className="h-3.5 w-3.5" />
         </button>
 
-        <span className="w-[1px] h-4 bg-[#222222] mx-1" />
+        <span className="w-[1px] h-4 bg-[#e0e0e0] mx-1" />
 
         {/* Alignment */}
         <button
@@ -190,8 +190,8 @@ export function EditorToolbar({
           onClick={() => editor.chain().focus().setTextAlign('left').run()}
           className={`p-1.5 rounded-[2px] transition-colors ${
             editor.isActive({ textAlign: 'left' })
-              ? 'bg-[#222222] text-[#FAFAFA]'
-              : 'text-[#737373] hover:text-[#FAFAFA] hover:bg-[#141414]'
+              ? 'bg-[#e8eaed] text-[#202124]'
+              : 'text-[#5f6368] hover:text-[#202124] hover:bg-[#e8eaed]'
           }`}
           title="Align Left"
         >
@@ -203,8 +203,8 @@ export function EditorToolbar({
           onClick={() => editor.chain().focus().setTextAlign('center').run()}
           className={`p-1.5 rounded-[2px] transition-colors ${
             editor.isActive({ textAlign: 'center' })
-              ? 'bg-[#222222] text-[#FAFAFA]'
-              : 'text-[#737373] hover:text-[#FAFAFA] hover:bg-[#141414]'
+              ? 'bg-[#e8eaed] text-[#202124]'
+              : 'text-[#5f6368] hover:text-[#202124] hover:bg-[#e8eaed]'
           }`}
           title="Align Center"
         >
@@ -216,15 +216,15 @@ export function EditorToolbar({
           onClick={() => editor.chain().focus().setTextAlign('right').run()}
           className={`p-1.5 rounded-[2px] transition-colors ${
             editor.isActive({ textAlign: 'right' })
-              ? 'bg-[#222222] text-[#FAFAFA]'
-              : 'text-[#737373] hover:text-[#FAFAFA] hover:bg-[#141414]'
+              ? 'bg-[#e8eaed] text-[#202124]'
+              : 'text-[#5f6368] hover:text-[#202124] hover:bg-[#e8eaed]'
           }`}
           title="Align Right"
         >
           <AlignRight className="h-3.5 w-3.5" />
         </button>
 
-        <span className="w-[1px] h-4 bg-[#222222] mx-1" />
+        <span className="w-[1px] h-4 bg-[#e0e0e0] mx-1" />
 
         {/* Lists & Blocks */}
         <button
@@ -232,8 +232,8 @@ export function EditorToolbar({
           onClick={() => editor.chain().focus().toggleBulletList().run()}
           className={`p-1.5 rounded-[2px] transition-colors ${
             editor.isActive('bulletList')
-              ? 'bg-[#222222] text-[#FAFAFA]'
-              : 'text-[#737373] hover:text-[#FAFAFA] hover:bg-[#141414]'
+              ? 'bg-[#e8eaed] text-[#202124]'
+              : 'text-[#5f6368] hover:text-[#202124] hover:bg-[#e8eaed]'
           }`}
           title="Bulleted List"
         >
@@ -245,8 +245,8 @@ export function EditorToolbar({
           onClick={() => editor.chain().focus().toggleOrderedList().run()}
           className={`p-1.5 rounded-[2px] transition-colors ${
             editor.isActive('orderedList')
-              ? 'bg-[#222222] text-[#FAFAFA]'
-              : 'text-[#737373] hover:text-[#FAFAFA] hover:bg-[#141414]'
+              ? 'bg-[#e8eaed] text-[#202124]'
+              : 'text-[#5f6368] hover:text-[#202124] hover:bg-[#e8eaed]'
           }`}
           title="Numbered List"
         >
@@ -258,8 +258,8 @@ export function EditorToolbar({
           onClick={() => editor.chain().focus().toggleTaskList().run()}
           className={`p-1.5 rounded-[2px] transition-colors ${
             editor.isActive('taskList')
-              ? 'bg-[#222222] text-[#FAFAFA]'
-              : 'text-[#737373] hover:text-[#FAFAFA] hover:bg-[#141414]'
+              ? 'bg-[#e8eaed] text-[#202124]'
+              : 'text-[#5f6368] hover:text-[#202124] hover:bg-[#e8eaed]'
           }`}
           title="Task Checklist"
         >
@@ -271,15 +271,15 @@ export function EditorToolbar({
           onClick={() => editor.chain().focus().toggleBlockquote().run()}
           className={`p-1.5 rounded-[2px] transition-colors ${
             editor.isActive('blockquote')
-              ? 'bg-[#222222] text-[#FAFAFA]'
-              : 'text-[#737373] hover:text-[#FAFAFA] hover:bg-[#141414]'
+              ? 'bg-[#e8eaed] text-[#202124]'
+              : 'text-[#5f6368] hover:text-[#202124] hover:bg-[#e8eaed]'
           }`}
           title="Blockquote"
         >
           <Quote className="h-3.5 w-3.5" />
         </button>
 
-        <span className="w-[1px] h-4 bg-[#222222] mx-1" />
+        <span className="w-[1px] h-4 bg-[#e0e0e0] mx-1" />
 
         {/* Tables */}
         <div className="relative">
@@ -288,8 +288,8 @@ export function EditorToolbar({
             onClick={() => setShowTableMenu(!showTableMenu)}
             className={`p-1.5 rounded-[2px] transition-colors ${
               editor.isActive('table')
-                ? 'bg-[#222222] text-[#FAFAFA]'
-                : 'text-[#737373] hover:text-[#FAFAFA] hover:bg-[#141414]'
+                ? 'bg-[#e8eaed] text-[#202124]'
+                : 'text-[#5f6368] hover:text-[#202124] hover:bg-[#e8eaed]'
             }`}
             title="Table Operations"
           >
@@ -297,14 +297,14 @@ export function EditorToolbar({
           </button>
 
           {showTableMenu && (
-            <div className="absolute left-0 top-full mt-1 w-48 rounded-[2px] bg-[#151515] border border-[#2D2D2D] shadow-xl p-1 z-40 text-xs font-mono space-y-0.5">
+            <div className="absolute left-0 top-full mt-1 w-48 rounded-[2px] bg-white border border-[#e0e0e0] shadow-xl p-1 z-40 text-xs font-mono space-y-0.5">
               <button
                 type="button"
                 onClick={() => {
                   editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
                   setShowTableMenu(false);
                 }}
-                className="w-full text-left px-2 py-1 hover:bg-[#222222] rounded-[2px] text-[#FAFAFA]"
+                className="w-full text-left px-2 py-1 hover:bg-[#f1f3f4] rounded text-[#202124]"
               >
                 Insert 3x3 Table
               </button>
@@ -314,7 +314,7 @@ export function EditorToolbar({
                   editor.chain().focus().addRowAfter().run();
                   setShowTableMenu(false);
                 }}
-                className="w-full text-left px-2 py-1 hover:bg-[#222222] rounded-[2px] text-[#A3A3A3]"
+                className="w-full text-left px-2 py-1 hover:bg-[#f1f3f4] rounded text-[#5f6368]"
               >
                 Add Row Below
               </button>
@@ -324,7 +324,7 @@ export function EditorToolbar({
                   editor.chain().focus().addColumnAfter().run();
                   setShowTableMenu(false);
                 }}
-                className="w-full text-left px-2 py-1 hover:bg-[#222222] rounded-[2px] text-[#A3A3A3]"
+                className="w-full text-left px-2 py-1 hover:bg-[#f1f3f4] rounded text-[#5f6368]"
               >
                 Add Column Right
               </button>
@@ -334,7 +334,7 @@ export function EditorToolbar({
                   editor.chain().focus().deleteRow().run();
                   setShowTableMenu(false);
                 }}
-                className="w-full text-left px-2 py-1 hover:bg-[#222222] rounded-[2px] text-[#A3A3A3]"
+                className="w-full text-left px-2 py-1 hover:bg-[#f1f3f4] rounded text-[#5f6368]"
               >
                 Delete Row
               </button>
@@ -344,7 +344,7 @@ export function EditorToolbar({
                   editor.chain().focus().deleteColumn().run();
                   setShowTableMenu(false);
                 }}
-                className="w-full text-left px-2 py-1 hover:bg-[#222222] rounded-[2px] text-[#A3A3A3]"
+                className="w-full text-left px-2 py-1 hover:bg-[#f1f3f4] rounded text-[#5f6368]"
               >
                 Delete Column
               </button>
@@ -354,7 +354,7 @@ export function EditorToolbar({
                   editor.chain().focus().deleteTable().run();
                   setShowTableMenu(false);
                 }}
-                className="w-full text-left px-2 py-1 hover:bg-[#222222] rounded-[2px] text-[#FAFAFA]"
+                className="w-full text-left px-2 py-1 hover:bg-[#f1f3f4] rounded text-[#202124]"
               >
                 Delete Entire Table
               </button>
@@ -369,8 +369,8 @@ export function EditorToolbar({
             onClick={() => setShowLinkInput(!showLinkInput)}
             className={`p-1.5 rounded-[2px] transition-colors ${
               editor.isActive('link')
-                ? 'bg-[#222222] text-[#FAFAFA]'
-                : 'text-[#737373] hover:text-[#FAFAFA] hover:bg-[#141414]'
+                ? 'bg-[#e8eaed] text-[#202124]'
+                : 'text-[#5f6368] hover:text-[#202124] hover:bg-[#e8eaed]'
             }`}
             title="Hyperlink"
           >
@@ -386,12 +386,12 @@ export function EditorToolbar({
                 value={linkUrl}
                 onChange={(e) => setLinkUrl(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && setLink()}
-                className="bg-[#101010] border border-[#2D2D2D] px-2 py-1 text-xs text-[#FAFAFA] rounded-[2px] focus:outline-none w-48"
+                className="bg-white border border-[#e0e0e0] px-2 py-1 text-xs text-[#202124] rounded-[2px] focus:outline-none w-48"
               />
               <button
                 type="button"
                 onClick={setLink}
-                className="px-2 py-1 bg-[#FAFAFA] text-[#111111] font-mono text-[10px] rounded-[2px]"
+                className="px-2 py-1 bg-[#1a73e8] text-white font-mono text-[10px] rounded"
               >
                 APPLY
               </button>
@@ -403,20 +403,20 @@ export function EditorToolbar({
         <button
           type="button"
           onClick={onInsertImage}
-          className="p-1.5 rounded-[2px] text-[#737373] hover:text-[#FAFAFA] hover:bg-[#141414] transition-colors"
+          className="p-1.5 rounded-[2px] text-[#5f6368] hover:text-[#202124] hover:bg-[#e8eaed] transition-colors"
           title="Upload / Insert Image"
         >
           <ImageIcon className="h-3.5 w-3.5" />
         </button>
 
-        <span className="w-[1px] h-4 bg-[#222222] mx-1" />
+        <span className="w-[1px] h-4 bg-[#e0e0e0] mx-1" />
 
         {/* Undo / Redo */}
         <button
           type="button"
           onClick={() => editor.chain().focus().undo().run()}
           disabled={!editor.can().undo()}
-          className="p-1.5 rounded-[2px] text-[#737373] hover:text-[#FAFAFA] disabled:opacity-30 disabled:hover:text-[#737373]"
+          className="p-1.5 rounded-[2px] text-[#5f6368] hover:text-[#202124] disabled:opacity-30 disabled:hover:text-[#737373]"
           title="Undo (⌘Z)"
         >
           <Undo className="h-3.5 w-3.5" />
@@ -426,7 +426,7 @@ export function EditorToolbar({
           type="button"
           onClick={() => editor.chain().focus().redo().run()}
           disabled={!editor.can().redo()}
-          className="p-1.5 rounded-[2px] text-[#737373] hover:text-[#FAFAFA] disabled:opacity-30 disabled:hover:text-[#737373]"
+          className="p-1.5 rounded-[2px] text-[#5f6368] hover:text-[#202124] disabled:opacity-30 disabled:hover:text-[#737373]"
           title="Redo (⌘⇧Z)"
         >
           <Redo className="h-3.5 w-3.5" />
@@ -445,7 +445,7 @@ export function EditorToolbar({
         <button
           type="button"
           onClick={onToggleFullWidth}
-          className="p-1 rounded-[2px] text-[#737373] hover:text-[#FAFAFA] hover:bg-[#141414] transition-colors"
+          className="p-1 rounded-[2px] text-[#5f6368] hover:text-[#202124] hover:bg-[#e8eaed] transition-colors"
           title={isFullWidth ? 'Standard Reading Margins' : 'Full Width Canvas'}
         >
           {isFullWidth ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}

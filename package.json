@@ -3,16 +3,19 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "node start-dev.js",
-    "postinstall": "cd backend && npm install --include=dev && node node_modules/prisma/build/index.js generate --schema=../prisma/schema.prisma && npm run build",
-    "build": "cd backend && npm install --include=dev && node node_modules/prisma/build/index.js generate --schema=../prisma/schema.prisma && npm run build",
-    "start": "cd backend && node node_modules/prisma/build/index.js db push --schema=../prisma/schema.prisma && npm start",
+    "postinstall": "cd backend && npm install --include=dev && npm run render:build",
+    "build": "cd backend && npm install --include=dev && npm run render:build",
+    "start": "cd backend && npm run render:start",
     "start:dev": "node start-dev.js",
     "dev:backend": "npm --prefix backend run dev",
     "dev:frontend": "npm --prefix frontend run dev",
-    "prisma:generate": "cd backend && node node_modules/prisma/build/index.js generate --schema=../prisma/schema.prisma",
-    "prisma:db:push": "cd backend && node node_modules/prisma/build/index.js db push --schema=../prisma/schema.prisma",
+    "prisma:generate": "cd backend && npm run prisma:generate",
+    "prisma:db:push": "cd backend && npm run prisma:db:push",
     "build:backend": "cd backend && npm install --include=dev && npm run render:build",
-    "build:frontend": "cd frontend && npm install --include=dev && npm run build"
+    "build:frontend": "cd frontend && npm install --include=dev && npm run build",
+    "build:all": "npm run build:backend && npm run build:frontend",
+    "start:all": "node start-prod.js",
+    "start:prod": "node start-prod.js"
   },
   "devDependencies": {
     "prisma": "^6.19.3"

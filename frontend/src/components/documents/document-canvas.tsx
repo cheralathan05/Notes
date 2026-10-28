@@ -282,32 +282,32 @@ export function DocumentCanvas({
   const charCount = textContent.length;
 
   return (
-    <div className="flex-1 flex overflow-hidden bg-[#080808]">
+    <div className="flex-1 flex overflow-hidden" style={{ background: '#f0f4f9' }}>
       {/* ─── Main Editor Canvas Column ─── */}
       <div className="flex-1 flex flex-col overflow-y-auto">
         {/* Top Header / Breadcrumbs Bar */}
         {!distractionFree && (
-          <div className="px-6 py-2.5 border-b border-[#1C1C1C] flex items-center justify-between text-xs font-mono select-none">
+          <div className="px-6 py-2 border-b border-[#e0e0e0] flex items-center justify-between text-xs font-mono select-none bg-white">
             {/* Breadcrumbs */}
-            <div className="flex items-center gap-1.5 text-[#737373] truncate">
-              <span>WORKSPACE</span>
+            <div className="flex items-center gap-1.5 text-[#5f6368] truncate">
+              <span className="text-[#5f6368]">WORKSPACE</span>
               <ChevronRight className="h-3 w-3" />
               {document.folder && (
                 <>
-                  <span className="text-[#A3A3A3] truncate">{document.folder.name}</span>
+                  <span className="text-[#3c4043] truncate">{document.folder.name}</span>
                   <ChevronRight className="h-3 w-3" />
                 </>
               )}
-              <span className="text-[#FAFAFA] truncate font-medium">{title}</span>
+              <span className="text-[#202124] truncate font-medium">{title}</span>
             </div>
 
             {/* Quick Canvas Controls */}
-            <div className="flex items-center gap-1 text-[#A3A3A3]">
+            <div className="flex items-center gap-1 text-[#5f6368]">
               <button
                 type="button"
                 onClick={handleToggleFavorite}
-                className={`p-1.5 rounded-[2px] transition-colors ${
-                  isFavorite ? 'text-[#FAFAFA]' : 'text-[#737373] hover:text-[#FAFAFA]'
+                className={`p-1.5 rounded transition-colors ${
+                  isFavorite ? 'text-[#fbbc04]' : 'text-[#5f6368] hover:text-[#202124] hover:bg-[#f1f3f4]'
                 }`}
                 title={isFavorite ? 'Favorited' : 'Add to Favorites'}
               >
@@ -317,8 +317,8 @@ export function DocumentCanvas({
               <button
                 type="button"
                 onClick={handleTogglePin}
-                className={`p-1.5 rounded-[2px] transition-colors ${
-                  isPinned ? 'text-[#FAFAFA]' : 'text-[#737373] hover:text-[#FAFAFA]'
+                className={`p-1.5 rounded transition-colors ${
+                  isPinned ? 'text-[#1a73e8]' : 'text-[#5f6368] hover:text-[#202124] hover:bg-[#f1f3f4]'
                 }`}
                 title={isPinned ? 'Pinned' : 'Pin Document'}
               >
@@ -328,8 +328,8 @@ export function DocumentCanvas({
               <button
                 type="button"
                 onClick={() => setIsTocOpen(!isTocOpen)}
-                className={`p-1.5 rounded-[2px] transition-colors ${
-                  isTocOpen ? 'text-[#FAFAFA]' : 'text-[#737373] hover:text-[#FAFAFA]'
+                className={`p-1.5 rounded transition-colors ${
+                  isTocOpen ? 'text-[#1a73e8] bg-[#e8f0fe]' : 'text-[#5f6368] hover:text-[#202124] hover:bg-[#f1f3f4]'
                 }`}
                 title="Table of Contents Outline"
               >
@@ -339,8 +339,8 @@ export function DocumentCanvas({
               <button
                 type="button"
                 onClick={() => setIsFindReplaceOpen(!isFindReplaceOpen)}
-                className={`p-1.5 rounded-[2px] transition-colors ${
-                  isFindReplaceOpen ? 'text-[#FAFAFA]' : 'text-[#737373] hover:text-[#FAFAFA]'
+                className={`p-1.5 rounded transition-colors ${
+                  isFindReplaceOpen ? 'text-[#1a73e8] bg-[#e8f0fe]' : 'text-[#5f6368] hover:text-[#202124] hover:bg-[#f1f3f4]'
                 }`}
                 title="Find & Replace (⌘F)"
               >
@@ -350,7 +350,7 @@ export function DocumentCanvas({
               <button
                 type="button"
                 onClick={() => setIsQuickCaptureOpen(true)}
-                className="p-1.5 rounded-[2px] text-[#737373] hover:text-[#FAFAFA] transition-colors"
+                className="p-1.5 rounded text-[#5f6368] hover:text-[#202124] hover:bg-[#f1f3f4] transition-colors"
                 title="Universal Quick Capture (Ctrl+Shift+C)"
               >
                 <Zap className="h-3.5 w-3.5" />
@@ -359,16 +359,17 @@ export function DocumentCanvas({
               <button
                 type="button"
                 onClick={() => setIsShareModalOpen(true)}
-                className="p-1.5 rounded-[2px] text-[#737373] hover:text-[#FAFAFA]"
+                className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#1a73e8] hover:bg-[#1558b0] text-white text-xs font-medium transition-colors"
                 title="Share & Permissions"
               >
                 <Share2 className="h-3.5 w-3.5" />
+                <span>Share</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setIsExportModalOpen(true)}
-                className="p-1.5 rounded-[2px] text-[#737373] hover:text-[#FAFAFA]"
+                className="p-1.5 rounded text-[#5f6368] hover:text-[#202124] hover:bg-[#f1f3f4]"
                 title="Export Document"
               >
                 <Download className="h-3.5 w-3.5" />
@@ -377,7 +378,7 @@ export function DocumentCanvas({
               <button
                 type="button"
                 onClick={() => setIsRevisionModalOpen(true)}
-                className="p-1.5 rounded-[2px] text-[#737373] hover:text-[#FAFAFA]"
+                className="p-1.5 rounded text-[#5f6368] hover:text-[#202124] hover:bg-[#f1f3f4]"
                 title="Revision History"
               >
                 <History className="h-3.5 w-3.5" />
@@ -386,10 +387,10 @@ export function DocumentCanvas({
               <button
                 type="button"
                 onClick={() => setIsAiPanelOpen(!isAiPanelOpen)}
-                className={`flex items-center gap-1 px-2 py-1 rounded-[2px] border text-xs transition-colors ${
+                className={`flex items-center gap-1 px-2 py-1 rounded border text-xs transition-colors ${
                   isAiPanelOpen
-                    ? 'bg-[#FAFAFA] text-[#111111] border-transparent font-semibold'
-                    : 'bg-[#151515] border-[#2D2D2D] text-[#FAFAFA] hover:bg-[#1D1D1D]'
+                    ? 'bg-[#e8f0fe] text-[#1a73e8] border-[#c5cff8] font-semibold'
+                    : 'bg-white border-[#dadce0] text-[#3c4043] hover:bg-[#f1f3f4]'
                 }`}
                 title="AI Co-Pilot"
               >
@@ -400,7 +401,7 @@ export function DocumentCanvas({
               <button
                 type="button"
                 onClick={() => setDistractionFree(true)}
-                className="p-1.5 rounded-[2px] text-[#737373] hover:text-[#FAFAFA]"
+                className="p-1.5 rounded text-[#5f6368] hover:text-[#202124] hover:bg-[#f1f3f4]"
                 title="Distraction-Free Mode"
               >
                 <Maximize className="h-3.5 w-3.5" />
@@ -411,23 +412,23 @@ export function DocumentCanvas({
                 <button
                   type="button"
                   onClick={() => setShowActionsDropdown(!showActionsDropdown)}
-                  className="p-1.5 rounded-[2px] text-[#737373] hover:text-[#FAFAFA]"
+                  className="p-1.5 rounded text-[#5f6368] hover:text-[#202124] hover:bg-[#f1f3f4]"
                 >
                   <MoreVertical className="h-3.5 w-3.5" />
                 </button>
 
                 {showActionsDropdown && (
-                  <div className="absolute right-0 top-full mt-1 w-44 rounded-[2px] bg-[#151515] border border-[#2D2D2D] shadow-xl p-1 z-40 text-xs font-mono space-y-0.5">
+                  <div className="absolute right-0 top-full mt-1 w-48 rounded bg-white border border-[#e0e0e0] shadow-xl p-1 z-40 text-xs space-y-0.5">
                     <button
                       type="button"
                       onClick={() => {
                         performSave();
                         setShowActionsDropdown(false);
                       }}
-                      className="w-full text-left px-2 py-1.5 hover:bg-[#222222] rounded-[2px] text-[#FAFAFA] flex items-center gap-2"
+                      className="w-full text-left px-3 py-1.5 hover:bg-[#f1f3f4] rounded text-[#202124] flex items-center gap-2"
                     >
-                      <Save className="h-3.5 w-3.5 text-[#737373]" />
-                      <span>Manual Save</span>
+                      <Save className="h-3.5 w-3.5 text-[#5f6368]" />
+                      <span>Save now</span>
                     </button>
                     <button
                       type="button"
@@ -435,10 +436,10 @@ export function DocumentCanvas({
                         setIsActivityModalOpen(true);
                         setShowActionsDropdown(false);
                       }}
-                      className="w-full text-left px-2 py-1.5 hover:bg-[#222222] rounded-[2px] text-[#A3A3A3] flex items-center gap-2"
+                      className="w-full text-left px-3 py-1.5 hover:bg-[#f1f3f4] rounded text-[#3c4043] flex items-center gap-2"
                     >
-                      <Activity className="h-3.5 w-3.5 text-[#737373]" />
-                      <span>Activity Timeline</span>
+                      <Activity className="h-3.5 w-3.5 text-[#5f6368]" />
+                      <span>Version history</span>
                     </button>
                     <button
                       type="button"
@@ -446,21 +447,22 @@ export function DocumentCanvas({
                         handleDuplicate();
                         setShowActionsDropdown(false);
                       }}
-                      className="w-full text-left px-2 py-1.5 hover:bg-[#222222] rounded-[2px] text-[#A3A3A3] flex items-center gap-2"
+                      className="w-full text-left px-3 py-1.5 hover:bg-[#f1f3f4] rounded text-[#3c4043] flex items-center gap-2"
                     >
-                      <Copy className="h-3.5 w-3.5 text-[#737373]" />
-                      <span>Duplicate Document</span>
+                      <Copy className="h-3.5 w-3.5 text-[#5f6368]" />
+                      <span>Make a copy</span>
                     </button>
+                    <hr className="border-[#e0e0e0] my-1" />
                     <button
                       type="button"
                       onClick={() => {
                         handleTrashDocument();
                         setShowActionsDropdown(false);
                       }}
-                      className="w-full text-left px-2 py-1.5 hover:bg-[#222222] rounded-[2px] text-[#FAFAFA] flex items-center gap-2"
+                      className="w-full text-left px-3 py-1.5 hover:bg-[#fce8e6] rounded text-[#ea4335] flex items-center gap-2"
                     >
-                      <Trash2 className="h-3.5 w-3.5 text-[#737373]" />
-                      <span>Move to Trash</span>
+                      <Trash2 className="h-3.5 w-3.5" />
+                      <span>Move to trash</span>
                     </button>
                   </div>
                 )}
@@ -504,34 +506,36 @@ export function DocumentCanvas({
           onChange={handleImageUpload}
         />
 
-        {/* ─── Document Editing Canvas ─── */}
-        <div className={`mx-auto w-full px-6 py-10 transition-all ${isFullWidth ? 'max-w-6xl' : 'max-w-3xl'}`}>
+        {/* ─── Document Editing Canvas (Google Docs style paper) ─── */}
+        <div className="flex-1 py-8 px-4">
+          <div
+            className={`mx-auto bg-white shadow-md transition-all ${
+              isFullWidth ? 'max-w-5xl' : 'max-w-3xl'
+            }`}
+            style={{ minHeight: 'calc(100vh - 160px)', padding: '72px 96px' }}
+          >
           {/* Document Icon & Title Header */}
-          <div className="space-y-4 mb-8">
+          <div className="space-y-3 mb-6">
             <div className="flex items-center gap-3">
               {/* Icon Picker Trigger */}
               <div className="relative">
                 <button
                   type="button"
                   onClick={() => setShowIconPicker(!showIconPicker)}
-                  className="text-3xl p-1 rounded-[2px] hover:bg-[#151515] transition-colors"
+                  className="text-3xl p-1 rounded hover:bg-[#f1f3f4] transition-colors"
                   title="Change Document Icon"
                 >
                   {icon}
                 </button>
 
                 {showIconPicker && (
-                  <div className="absolute left-0 top-full mt-1 p-2 rounded-[2px] bg-[#151515] border border-[#2D2D2D] shadow-2xl z-40 grid grid-cols-5 gap-1.5">
+                  <div className="absolute left-0 top-full mt-1 p-2 rounded bg-white border border-[#e0e0e0] shadow-xl z-40 grid grid-cols-5 gap-1.5">
                     {iconsList.map((ic) => (
                       <button
                         key={ic}
                         type="button"
-                        onClick={() => {
-                          setIcon(ic);
-                          setShowIconPicker(false);
-                          performSave();
-                        }}
-                        className="text-xl p-1.5 rounded-[2px] hover:bg-[#262626]"
+                        onClick={() => { setIcon(ic); setShowIconPicker(false); performSave(); }}
+                        className="text-xl p-1.5 rounded hover:bg-[#f1f3f4]"
                       >
                         {ic}
                       </button>
@@ -541,31 +545,33 @@ export function DocumentCanvas({
               </div>
             </div>
 
-            {/* Document Title Input */}
+            {/* Document Title Input - Google Docs style */}
             <input
               type="text"
               value={title}
               onChange={(e) => handleTitleChange(e.target.value)}
               placeholder="Untitled"
-              className="w-full bg-transparent text-3xl sm:text-4xl font-light text-[#FAFAFA] placeholder-[#404040] tracking-tight focus:outline-none border-b border-transparent focus:border-[#2D2D2D] pb-1 transition-colors"
+              className="w-full bg-transparent text-[32px] font-normal text-[#202124] placeholder-[#bdc1c6] tracking-tight focus:outline-none pb-2 transition-colors"
+              style={{ fontFamily: "'Google Sans', Arial, sans-serif", lineHeight: 1.3 }}
             />
           </div>
 
           {/* TipTap Editor Render Area */}
-          <div className="relative min-h-[500px]">
+          <div className="relative prose-gdocs">
             <EditorContent editor={editor} />
           </div>
 
-          {/* Footer Stats (Word count, char count) */}
-          <div className="mt-16 pt-4 border-t border-[#1C1C1C] flex items-center justify-between font-mono text-[11px] text-[#505050]">
+          {/* Footer Stats */}
+          <div className="mt-16 pt-4 border-t border-[#e0e0e0] flex items-center justify-between text-[11px] text-[#9aa0a6]" style={{ fontFamily: 'monospace' }}>
             <div className="flex items-center gap-4">
-              <span>{wordCount} WORDS</span>
-              <span>{charCount} CHARACTERS</span>
+              <span>{wordCount} words</span>
+              <span>{charCount} characters</span>
             </div>
-            <span>KRONOS DOCUMENT GRAPH // VER {version}</span>
+            <span>Version {version}</span>
           </div>
         </div>
       </div>
+    </div>
 
       {/* ─── AI Side Panel Column ─── */}
       <AiAssistantPanel
