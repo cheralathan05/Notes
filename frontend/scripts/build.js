@@ -3,15 +3,15 @@ const { spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
-// 1. Sanitize NODE_ENV: strip quotes, trim whitespace, ensure standard value
-let nodeEnv = (process.env.NODE_ENV || 'production').replace(/['"]/g, '').trim();
-if (!['production', 'development', 'test'].includes(nodeEnv)) {
-  nodeEnv = 'production';
-}
+// Next.js `next build` MUST unconditionally run with NODE_ENV = 'production'.
+// If NODE_ENV is 'development' (e.g. inherited from a dashboard setting or .env),
+// Next.js issues a non-standard NODE_ENV warning, loads React in development mode,
+// and React's SSR hook dispatcher becomes null during static page generation.
+process.env.NODE_ENV = 'production';
 
 const env = {
   ...process.env,
-  NODE_ENV: nodeEnv,
+  NODE_ENV: 'production',
   NEXT_CPU_COUNT: '1',
   NEXT_TELEMETRY_DISABLED: '1',
   NODE_OPTIONS: process.env.NODE_OPTIONS || '--max-old-space-size=460',
