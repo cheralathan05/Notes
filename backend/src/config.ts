@@ -6,7 +6,7 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env'), override: true });
 dotenv.config({ path: path.resolve(__dirname, '../.env'), override: true });
 dotenv.config({ override: true });
 
-const requiredVars = ['DATABASE_URL', 'SESSION_SECRET'];
+const requiredVars = ['DATABASE_URL'];
 
 export function validateEnv(): void {
   const missing = requiredVars.filter((key) => !process.env[key]);
@@ -14,6 +14,9 @@ export function validateEnv(): void {
     console.error('❌ Missing required environment variables:');
     missing.forEach((key) => console.error(`   - ${key}`));
     process.exit(1);
+  }
+  if (!process.env.SESSION_SECRET) {
+    console.warn('⚠️ SESSION_SECRET is not set. Using secure fallback secret.');
   }
 }
 

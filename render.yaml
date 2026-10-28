@@ -1,13 +1,12 @@
 services:
-  # ─── 1. Backend API Service (Express + Prisma) ──────────────────────────────
+  # ─── Unified Full-Stack Web Service (Frontend + Backend in One) ─────────────
   - type: web
-    name: kronos-backend
+    name: kronos-workspace
     runtime: node
     plan: free
     region: virginia
-    rootDir: .
-    buildCommand: npm install --include=dev && cd backend && npm install --include=dev && npm run render:build
-    startCommand: cd backend && npm run render:start
+    buildCommand: npm run build:all
+    startCommand: npm run start:all
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
@@ -21,31 +20,9 @@ services:
       - key: SESSION_SECRET
         generateValue: true
       - key: COOKIE_SAME_SITE
-        value: none
+        value: lax
       - key: EMAIL_PROVIDER
         value: console
-
-  # ─── 2. Frontend Web Service (Next.js) ──────────────────────────────────────
-  - type: web
-    name: kronos-frontend
-    runtime: node
-    plan: free
-    region: virginia
-    rootDir: frontend
-    buildCommand: npm install --include=dev && npm run build
-    startCommand: npm start
-    envVars:
-      - key: NODE_VERSION
-        value: "20.18.1"
-      - key: NODE_ENV
-        value: production
-      - key: BACKEND_INTERNAL_URL
-        fromService:
-          type: web
-          name: kronos-backend
-          envVarKey: RENDER_EXTERNAL_HOSTNAME
-      - key: NEXT_PUBLIC_API_URL
-        value: ""
       - key: NODE_OPTIONS
         value: "--max-old-space-size=460"
       - key: NEXT_CPU_COUNT
@@ -54,7 +31,7 @@ services:
         value: "1"
 
 databases:
-  # ─── 3. PostgreSQL Database ─────────────────────────────────────────────────
+  # ─── Managed PostgreSQL Database ────────────────────────────────────────────
   - name: kronos-db
     plan: free
     region: virginia

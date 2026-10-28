@@ -11,13 +11,16 @@ const path_1 = __importDefault(require("path"));
 dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '../../.env'), override: true });
 dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '../.env'), override: true });
 dotenv_1.default.config({ override: true });
-const requiredVars = ['DATABASE_URL', 'SESSION_SECRET'];
+const requiredVars = ['DATABASE_URL'];
 function validateEnv() {
     const missing = requiredVars.filter((key) => !process.env[key]);
     if (missing.length > 0) {
         console.error('❌ Missing required environment variables:');
         missing.forEach((key) => console.error(`   - ${key}`));
         process.exit(1);
+    }
+    if (!process.env.SESSION_SECRET) {
+        console.warn('⚠️ SESSION_SECRET is not set. Using secure fallback secret.');
     }
 }
 exports.config = {

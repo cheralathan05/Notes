@@ -127,6 +127,7 @@ async function start() {
     env: {
       ...process.env,
       PORT: PUBLIC_PORT,
+      HOSTNAME: '0.0.0.0',
       BACKEND_INTERNAL_URL: `http://127.0.0.1:${BACKEND_INTERNAL_PORT}`,
       NODE_ENV: 'production',
     },
